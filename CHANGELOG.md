@@ -2,6 +2,18 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.7.15] - 2026-05-28
+
+### Fixed — Sensitive-operation notification omits the source IP
+
+- A customer reported receiving `[jt-glogarch] ⚠️ 偵測到 1 個敏感行為` with body `admin — auth.login [admin] → 200` and no IP information. For a login alert the whole point is to know *where* the login came from — without the IP the operator can't tell whether it's themselves on the office network or someone on the wild internet.
+- Two bugs in `glogarch/audit/listener.py::_notify_sensitive`:
+  1. The line format only printed `user — op [target] → status`, dropping `remote_addr` even though it's already on every audit entry.
+  2. The dedup key was `(username, operation, target_name, status_code)`. The same user appearing from two different IPs in the same flush window got merged into a single line with `×2`, *hiding the security-relevant signal* that two distinct IPs were involved.
+- Fix: include `remote_addr` in the dedup key, and render the user as `user@ip` (falls back to bare `user` when the IP is empty, which can happen for cookie-session entries that haven't been resolved yet). Same-user/same-IP repeats still collapse into `×N`; same-user/different-IP now correctly shows on separate lines.
+- New notification body example: `admin@10.0.0.5 — auth.login [admin] → 200` (was: `admin — auth.login [admin] → 200`).
+- Body-formatting logic extracted to `AuditSyslogListener._format_sensitive_body` (pure static helper). New `tests/test_sensitive_notify_body.py` covers the six cases that matter — IP shown, IP missing, two-IP no-merge, same-IP merge with count, no target, and >5 groups truncation.
+
 ## [1.7.14] - 2026-05-14
 
 ### Fixed — `deploy/install.sh` failed on a clean Ubuntu 24.04 install with `externally-managed-environment`

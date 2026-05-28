@@ -737,27 +737,39 @@ class AuditSyslogListener:
         except Exception as e:
             log.error("Failed to flush audit batch", error=str(e))
 
+    @staticmethod
+    def _format_sensitive_body(entries: list[dict]) -> tuple[str, int]:
+        """Format the body of a sensitive-operation notification.
+
+        Deduplicate by (username, remote_addr, operation, target_name, status_code).
+        remote_addr is in the key so the same user appearing from two different
+        IPs (a security-relevant signal) doesn't get merged into one line.
+
+        Returns (body_text, distinct_groups).
+        """
+        groups: dict[tuple, int] = {}
+        for e in entries:
+            key = (e.get("username", "?"), e.get("remote_addr", ""),
+                   e.get("operation", "?"), e.get("target_name", ""),
+                   e.get("status_code", 0))
+            groups[key] = groups.get(key, 0) + 1
+
+        lines: list[str] = []
+        for (user, ip, op, target, status), count in list(groups.items())[:5]:
+            user_part = f"{user}@{ip}" if ip else user
+            target_part = f" [{target}]" if target else ""
+            count_part = f" ×{count}" if count > 1 else ""
+            lines.append(f"{user_part} — {op}{target_part} → {status}{count_part}")
+        if len(groups) > 5:
+            lines.append(f"... +{len(groups) - 5} more")
+        return "\n".join(lines), len(groups)
+
     async def _notify_sensitive(self, entries: list[dict]) -> None:
         """Send notification for sensitive API operations."""
         try:
-            from glogarch.notify.sender import send_notification, NotifyEvent
-            # Deduplicate: group by (username, operation, target_name, status_code)
-            groups: dict[tuple, int] = {}
-            for e in entries:
-                key = (e.get("username", "?"), e.get("operation", "?"),
-                       e.get("target_name", ""), e.get("status_code", 0))
-                groups[key] = groups.get(key, 0) + 1
-
-            lines = []
-            for (user, op, target, status), count in list(groups.items())[:5]:
-                target_part = f" [{target}]" if target else ""
-                count_part = f" ×{count}" if count > 1 else ""
-                lines.append(f"{user} — {op}{target_part} → {status}{count_part}")
-            if len(groups) > 5:
-                lines.append(f"... +{len(groups) - 5} more")
-            from glogarch.notify.sender import _t
-            title = _t("sensitive_title", n=len(groups))
-            body = "\n".join(lines)
+            from glogarch.notify.sender import send_notification, NotifyEvent, _t
+            body, n_groups = self._format_sensitive_body(entries)
+            title = _t("sensitive_title", n=n_groups)
             await send_notification(NotifyEvent.SENSITIVE_API_OPERATION, title, body)
         except Exception as e:
             log.warning("Failed to send sensitive operation notification", error=str(e))
