@@ -2,6 +2,18 @@
 
 jt-glogarch 所有重要變更皆記錄於此檔案。
 
+## [1.7.15] - 2026-05-28
+
+### 修正 — 敏感行為通知未顯示來源 IP
+
+- 客戶回報收到 `[jt-glogarch] ⚠️ 偵測到 1 個敏感行為` 通知，內文僅顯示 `admin — auth.login [admin] → 200`，**沒有任何 IP 資訊**。登入告警的重點本來就是要知道**從哪裡登入**，少了 IP 操作人員根本無法判斷是自己在公司網路、還是外部人士在外網。
+- `glogarch/audit/listener.py::_notify_sensitive` 有兩個問題：
+  1. 文字格式只印 `user — op [target] → status`，把每筆稽核紀錄裡明明就有的 `remote_addr` 完全丟掉。
+  2. 去重的 key 是 `(username, operation, target_name, status_code)`，所以**同一個使用者從兩個不同 IP 在同一個 flush 視窗內登入會被合併成一行 `×2`**，把「兩個 IP 都登入」這個**對資安最關鍵的訊號**藏起來了。
+- 修法：去重 key 加入 `remote_addr`，使用者顯示改為 `user@ip` 格式（若 IP 是空字串就退回顯示純使用者名，這對應 cookie session 還沒被解析出 IP 的少數情況）。同一使用者、同一 IP 重複觸發仍然會聚合成 `×N`；同一使用者、不同 IP 現在會分開列。
+- 新通知內文範例：`admin@10.0.0.5 — auth.login [admin] → 200`（原本：`admin — auth.login [admin] → 200`）。
+- 內文組裝邏輯抽出為 `AuditSyslogListener._format_sensitive_body` 純靜態方法，新增 `tests/test_sensitive_notify_body.py` 涵蓋六個關鍵情境：有 IP、沒 IP、雙 IP 不合併、同 IP 合併計數、無 target 不顯示括號、超過 5 筆顯示 `+N more`。
+
 ## [1.7.14] - 2026-05-14
 
 ### 修正 — Ubuntu 24.04 全新安裝執行 `deploy/install.sh` 時失敗於 `externally-managed-environment`
