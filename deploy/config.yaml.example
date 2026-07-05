@@ -38,7 +38,7 @@ default_server: graylog-main
 
 # --- Export Settings ---
 # export_mode: api or opensearch
-export_mode: opensearch
+export_mode: api
 
 export:
   base_path: /data/graylog-archives
