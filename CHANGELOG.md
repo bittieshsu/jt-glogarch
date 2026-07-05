@@ -2,6 +2,41 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.10.9] - 2026-07-05
+
+### PDF Reports (beta)
+
+- **Message preview joins its log entry as one visual row.** With "Show message in
+  new row" enabled, the message line now sits directly under its fields with no
+  separator between them (the row divider falls after the message), so each entry
+  reads as one row instead of looking like two.
+- **Polished report emails.** The email that delivers a report PDF now has a
+  formatted HTML body (title, generated time, file name/size) matching the
+  notification emails, instead of a single plain-text line.
+
+### Changed
+
+- **Default export mode `api` everywhere.** `config.yaml.example` now ships
+  `export_mode: api` to match the installer and the code default (Graylog API is
+  the universally-compatible, permission-respecting mode; the backpressure guard
+  protects it).
+- **Settings → Default Export Mode** shows a highlighted note that a schedule with
+  its own export mode ignores this default (it only applies to schedules with no
+  mode set and to manual exports).
+
+### Fixed
+
+- **Per-widget / per-tab time ranges are respected (report fidelity).** When a
+  report uses "each widget's own time range", it no longer forces every widget to
+  a single window — a widget saved as "last 5 days" now renders 5 days even if
+  another on the same dashboard is "last 1 day". "Use dashboard time" and a
+  report-wide range (incl. snap-to-midnight) are now mutually exclusive: with
+  per-widget time on, no global override is applied (in both rebuild and
+  screenshot modes).
+- **No redundant sidebar tooltip when expanded.** The left nav's instant hover
+  tooltip now only appears when the sidebar is collapsed to icons; when expanded
+  (labels visible) it is suppressed.
+
 ## [1.10.8] - 2026-07-05
 
 ### Fixed

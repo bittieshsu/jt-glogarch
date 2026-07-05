@@ -690,6 +690,18 @@ body {
 
 .sidebar.collapsed .nav-links li a span { display: none; }
 
+/* The left nav is fully labelled when expanded, so its instant hover tooltip is
+   redundant — only surface nav tooltips when the sidebar is collapsed to icons. */
+.sidebar:not(.collapsed) .nav-links a[data-tooltip]:hover::after,
+.sidebar:not(.collapsed) .nav-links a[data-tooltip]:hover::before { content: none; }
+
+/* Prominent note: a default that a more specific setting overrides. */
+.override-note {
+    margin: 6px 0 2px; padding: 7px 11px; border-radius: 6px;
+    background: rgba(240, 173, 78, 0.12); border-left: 3px solid var(--warning, #f0ad4e);
+    color: var(--warning, #c77c11); font-size: 0.85em; font-weight: 600;
+}
+
 .sidebar.collapsed .nav-links {
     padding: 40px 0 10px;
 }

@@ -75,10 +75,16 @@ async def generate_report(db, settings, cfg: dict, *, triggered_by: str = "manua
         mode = cfg.get("dashboard_mode", "rebuild")
         trs = int(cfg.get("time_range_seconds", 86400))
         maxw = int(cfg.get("max_widgets", 16))
-        # Snap-to-midnight only makes sense for whole-DAY windows (day/week/month).
-        # For a sub-day range (e.g. last 2 hours) ending at 00:00 is meaningless,
-        # so the option is ignored unless the range is a whole number of days.
-        align_midnight_eff = bool(cfg.get("align_midnight")) and trs % 86400 == 0
+        # "Use each widget's own time range" — each widget (and each tab) can have
+        # a DIFFERENT saved range in Graylog (e.g. one widget "last 5 days", another
+        # "last 1 day"), and this captures each exactly as configured. It is
+        # mutually exclusive with a report-wide window: when on, NO global time
+        # override is applied, so a report-wide range / snap-to-midnight is ignored.
+        use_dash_time = bool(cfg.get("use_dashboard_time", True))
+        # Snap-to-midnight only applies to a report-WIDE whole-day window (so it is
+        # off when per-widget times are used, and only for whole-day ranges).
+        align_midnight_eff = (bool(cfg.get("align_midnight")) and trs % 86400 == 0
+                              and not use_dash_time)
         web_user = cfg.get("graylog_web_username", "")
         web_pass = cfg.get("graylog_web_password", "")
         for dash in dashboards:
@@ -95,14 +101,18 @@ async def generate_report(db, settings, cfg: dict, *, triggered_by: str = "manua
                 if not (server and web_user and web_pass):
                     sec["capture_error"] = _t(lang, "no_capture")
                 else:
-                    # Apply the report's time window to the live dashboard too, so
-                    # the screenshot honours "時間範圍（小時）" and the snap-to-
-                    # midnight option (not just rebuild mode). Snap-to-midnight
-                    # ends the window at today 00:00; otherwise it ends now.
+                    # Time window for the capture. When the report uses each
+                    # widget's OWN time range, apply NO override — let the live
+                    # dashboard render every widget/tab at its own configured range
+                    # (so a "last 5 days" widget stays 5 days). Only when a report-
+                    # wide range is chosen do we override: snap-to-midnight ends at
+                    # today 00:00, otherwise it ends now.
                     from datetime import timedelta
-                    cap_to = (now.replace(hour=0, minute=0, second=0, microsecond=0)
-                              if align_midnight_eff else now)
-                    cap_from = cap_to - timedelta(seconds=trs)
+                    cap_from = cap_to = None
+                    if not use_dash_time:
+                        cap_to = (now.replace(hour=0, minute=0, second=0, microsecond=0)
+                                  if align_midnight_eff else now)
+                        cap_from = cap_to - timedelta(seconds=trs)
                     png, reason = await graylog_data.capture_dashboard_png(
                         server, did, web_username=web_user, web_password=web_pass,
                         time_range_seconds=trs, abs_from=cap_from, abs_to=cap_to)
@@ -131,7 +141,7 @@ async def generate_report(db, settings, cfg: dict, *, triggered_by: str = "manua
                         message_max_cols=int(cfg.get("message_max_cols", 0) or 0),
                         bar_horizontal=bool(cfg.get("bar_horizontal", False)),
                         heatmap_values=bool(cfg.get("heatmap_values", False)),
-                        use_dashboard_time=bool(cfg.get("use_dashboard_time", True)),
+                        use_dashboard_time=use_dash_time,
                         abs_from=abs_from, abs_to=abs_to)
                 if built:
                     sections.extend(built)
@@ -280,14 +290,40 @@ def _email_pdf(settings, recipients, subject_title, pdf: bytes, filename: str, l
     e = settings.notify.email
     if not e.smtp_host:
         raise RuntimeError("SMTP not configured (notify.email)")
+    import html as _html
+    from datetime import datetime
     msg = EmailMessage()
     prefix = e.subject_prefix or "[jt-glogarch]"
     msg["Subject"] = f"{prefix} {subject_title}"
     msg["From"] = e.from_addr or e.smtp_user
     msg["To"] = ", ".join(recipients)
-    body = ("附件為 jt-glogarch 產生的報表：%s" if lang == "zh-TW"
-            else "Attached is the jt-glogarch report: %s") % subject_title
-    msg.set_content(body)
+    now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %z")
+    mb = len(pdf) / (1024 * 1024)
+    size = f"{mb:.2f} MB" if mb >= 1 else f"{len(pdf) / 1024:.0f} KB"
+    L = ({"intro": "jt-glogarch 已為您產生下列報表，PDF 檔案已附於本信。",
+          "report": "報表", "generated": "產製時間", "file": "檔案",
+          "footer": "本信由 jt-glogarch 自動寄送"}
+         if lang == "zh-TW" else
+         {"intro": "jt-glogarch has generated the following report. The PDF is attached.",
+          "report": "Report", "generated": "Generated", "file": "File",
+          "footer": "Sent automatically by jt-glogarch"})
+    # Plain-text fallback + a polished HTML body (mirrors the notification email).
+    msg.set_content(f"{subject_title}\n\n{L['intro']}\n\n"
+                    f"{L['report']}: {subject_title}\n{L['generated']}: {now}\n"
+                    f"{L['file']}: {filename} ({size})\n\n{L['footer']}")
+    st, fn = _html.escape(subject_title), _html.escape(filename)
+    row = ('<tr><td style="padding:5px 16px 5px 0;color:#9aa">{k}</td>'
+           '<td style="padding:5px 0">{v}</td></tr>')
+    msg.add_alternative(f"""<div style="font-family:'Segoe UI',Helvetica,Arial,sans-serif;max-width:640px;color:#333">
+  <h2 style="color:#6c63ff;margin:0 0 8px">{_html.escape(prefix)} {st}</h2>
+  <p style="color:#555;margin:0 0 14px">{_html.escape(L['intro'])}</p>
+  <table style="border-collapse:collapse;font-size:14px;margin:0 0 16px">
+    {row.format(k=L['report'], v=f'<b>{st}</b>')}
+    {row.format(k=L['generated'], v=now)}
+    {row.format(k=L['file'], v=f'{fn} <span style="color:#9aa">({size})</span>')}
+  </table>
+  <p style="color:#aab;font-size:12px;border-top:1px solid #eee;padding-top:12px;margin:0">{_html.escape(L['footer'])} · Graylog Open Archive</p>
+</div>""", subtype="html")
     msg.add_attachment(pdf, maintype="application", subtype="pdf", filename=filename)
     if e.smtp_tls:
         with smtplib.SMTP(e.smtp_host, e.smtp_port, timeout=30) as s:
