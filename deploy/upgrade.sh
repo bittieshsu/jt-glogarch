@@ -21,6 +21,27 @@ if [ ! -d "$INSTALL_DIR/glogarch" ]; then
     exit 1
 fi
 
+# --- TLS / proxy options (for corporate MITM proxies or a broken CA store) ---
+#   --ca-bundle <file>   verify against a custom CA (e.g. the proxy root CA)
+#   --insecure           skip TLS verification for this run (like 'curl -k')
+# Both also readable from the environment (JT_CA_BUNDLE / JT_INSECURE).
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --ca-bundle) JT_CA_BUNDLE="$2"; shift 2 ;;
+        --ca-bundle=*) JT_CA_BUNDLE="${1#*=}"; shift ;;
+        --insecure) JT_INSECURE=1; shift ;;
+        -h|--help)
+            echo "Usage: sudo bash deploy/upgrade.sh [--ca-bundle <file>] [--insecure]"
+            exit 0 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+if [ -f "$INSTALL_DIR/deploy/tls-env.sh" ]; then
+    source "$INSTALL_DIR/deploy/tls-env.sh"
+else
+    export GIT_TERMINAL_PROMPT=0; GIT_TLS_OPTS=""; PIP_TLS_OPTS=""
+fi
+
 # Show current version
 CURRENT=$(python3 -c "import glogarch; print(glogarch.__version__)" 2>/dev/null || echo "unknown")
 echo "Current version: $CURRENT"
@@ -85,10 +106,48 @@ done
 # clean pull; if it fails, auto-stash the local changes and retry so the
 # upgrade proceeds. User data (config.yaml/certs/DB) is now gitignored above,
 # so `git stash -u` never touches it.
-if ! git pull --ff-only 2>/dev/null; then
+# Capture stderr so we can tell a TLS/CA failure (which auto-stash can't fix)
+# apart from a local-changes conflict (which it can).
+# `timeout` guards against a proxy that black-holes the connection (never hang);
+# $GIT_TLS_OPTS carries any --ca-bundle / --insecure choice.
+_git_pull() { timeout 180 git $GIT_TLS_OPTS pull --ff-only "$@"; }
+_pull_log="$(mktemp 2>/dev/null || echo "/tmp/jt-glogarch-pull.$$")"
+if _git_pull 2>"$_pull_log"; then
+    [ -s "$_pull_log" ] && cat "$_pull_log"      # show 'From github…' progress
+    rm -f "$_pull_log"
+else
+    _pull_err="$(cat "$_pull_log" 2>/dev/null)"
+    rm -f "$_pull_log"
+    # A TLS/CA verification failure is NOT a local-changes problem — stashing
+    # won't help. Detect it and print an actionable fix instead of a raw git
+    # error (real field case: 'server certificate verification failed.
+    # CAfile: none' = the host's system CA bundle is missing/broken, or a
+    # corporate TLS-interception proxy whose root CA isn't trusted here).
+    if printf '%s' "$_pull_err" | grep -qiE 'certificate verification failed|SSL certificate problem|unable to get local issuer|self.signed certificate'; then
+        echo "  ⚠ ERROR: git could not verify GitHub's TLS certificate:"
+        printf '      %s\n' "$_pull_err" | head -3
+        echo ""
+        echo "  This host cannot verify HTTPS. Pick ONE fix:"
+        echo ""
+        echo "  1) Broken/empty CA store ('CAfile: none') — repair it (RECOMMENDED):"
+        echo "        sudo apt-get install --reinstall -y ca-certificates && sudo update-ca-certificates"
+        echo ""
+        echo "  2) Behind a corporate TLS proxy — trust its root CA once (SECURE):"
+        echo "        sudo cp <proxy-root-ca>.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates"
+        echo "     …or, without touching the system store, point this upgrade at it:"
+        echo "        sudo bash deploy/upgrade.sh --ca-bundle /path/to/proxy-root-ca.crt"
+        echo ""
+        echo "  3) Accept the risk for this run only (like 'curl -k'):"
+        echo "        sudo bash deploy/upgrade.sh --insecure"
+        echo ""
+        echo "  Fully offline host? Use the offline bundle (no network/TLS):"
+        echo "        deploy/upgrade-offline.sh"
+        exit 1
+    fi
+    echo "$_pull_err"
     echo "  Local changes detected — stashing before pull..."
     git stash push -u -m "jt-glogarch upgrade auto-stash" >/dev/null 2>&1 || true
-    if ! git pull --ff-only; then
+    if ! _git_pull; then
         echo "  ⚠ ERROR: 'git pull' failed even after stashing local changes."
         echo "     Resolve manually (e.g. 'git status' in $INSTALL_DIR) and re-run."
         exit 1
@@ -126,10 +185,10 @@ fi
 # 3. Install
 echo ""
 echo "[3/5] Installing..."
-pip install $PIP_FLAGS --no-build-isolation --no-cache-dir --force-reinstall --no-deps "$INSTALL_DIR" 2>&1 | tail -1
+pip install $PIP_TLS_OPTS $PIP_FLAGS --no-build-isolation --no-cache-dir --force-reinstall --no-deps "$INSTALL_DIR" 2>&1 | tail -1
 # Pull in the [report] extra (Playwright) — an existing install predating PDF
 # Reports won't have it; upgrades must. Deps-only, cheap when already satisfied.
-pip install $PIP_FLAGS --no-build-isolation --no-cache-dir "$INSTALL_DIR"[report] 2>&1 | tail -1
+pip install $PIP_TLS_OPTS $PIP_FLAGS --no-build-isolation --no-cache-dir "$INSTALL_DIR"[report] 2>&1 | tail -1
 # Chromium browser + CJK font (best-effort; re-runnable — skips if present).
 if [ -f "$INSTALL_DIR/deploy/report-deps.sh" ]; then
     source "$INSTALL_DIR/deploy/report-deps.sh"

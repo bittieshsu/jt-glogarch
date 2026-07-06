@@ -2,6 +2,25 @@
 
 jt-glogarch 所有重要變更皆記錄於此檔案。
 
+## [1.10.13] - 2026-07-06
+
+### 部署——支援企業 TLS 攔截代理／CA 憑證庫損毀環境
+
+- **`install.sh` 與 `upgrade.sh` 現在能處理 TLS 攔截代理與系統 CA 憑證庫遺失的情況**，
+  不再直接卡在 `git`／`pip` 的原始錯誤上。實際案例：某台主機 `curl` 可正常上網，但
+  `git pull` 卻回報 `server certificate verification failed. CAfile: none`——原因是系統
+  `ca-certificates` 套件遺失。
+  - 遇到憑證驗證失敗時，升級會停下並印出明確、可操作的訊息，提供三種解法：修復
+    `ca-certificates`（建議）、信任企業代理的根 CA（安全），或以明確參數重跑。
+  - **兩支指令碼**皆新增選用參數（亦可用 `JT_CA_BUNDLE`／`JT_INSECURE` 環境變數）：
+    `--ca-bundle <檔案>` 以自訂 CA（例如代理的根 CA）進行驗證——安全的做法；
+    `--insecure` 則於該次執行略過 TLS 驗證（等同 `curl -k`，會顯示明顯警告）。兩者會
+    一致套用到 `git`、`pip`、`curl` 與 Playwright／Node。
+- **升級不會再卡住。** `git` 強制為非互動模式（`GIT_TERMINAL_PROMPT=0`），且 `git pull`
+  以逾時包裹，因此若代理要求帳密或吞掉連線，會快速給出明確失敗，而非讓終端卡死。
+- 現在會區分「TLS／CA 失敗」與「本機有未提交變更的衝突」，只有在自動 stash 重試真正
+  有幫助時才會走該路徑。
+
 ## [1.10.12] - 2026-07-06
 
 ### 修正
