@@ -2,6 +2,31 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.10.13] - 2026-07-06
+
+### Deployment — works behind a corporate TLS proxy / broken CA store
+
+- **`install.sh` and `upgrade.sh` now handle TLS-interception proxies and a
+  missing system CA store** instead of dying on a raw `git`/`pip` error. Real
+  field case: `git pull` failed with `server certificate verification failed.
+  CAfile: none` on a host where `curl` worked — the system `ca-certificates`
+  bundle was missing.
+  - On a certificate-verification failure the upgrade now stops with a clear,
+    actionable message offering three fixes: repair `ca-certificates`
+    (recommended), trust the corporate proxy's root CA (secure), or re-run with
+    an explicit flag.
+  - New opt-in flags on **both** scripts (also `JT_CA_BUNDLE` / `JT_INSECURE`
+    env): `--ca-bundle <file>` verifies against a custom CA (e.g. the proxy root
+    CA) — the secure choice — and `--insecure` skips TLS verification for that
+    run (the equivalent of `curl -k`, with a loud warning). Both are applied
+    consistently to `git`, `pip`, `curl` and Playwright/Node.
+- **Upgrades can no longer hang.** `git` is forced non-interactive
+  (`GIT_TERMINAL_PROMPT=0`) and `git pull` is wrapped in a timeout, so a proxy
+  that demands credentials or black-holes the connection produces a fast, clear
+  failure instead of a stuck terminal.
+- A TLS/CA failure is now distinguished from a local-changes conflict, so the
+  auto-stash retry path is only taken when it can actually help.
+
 ## [1.10.12] - 2026-07-06
 
 ### Fixed

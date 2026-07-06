@@ -24,6 +24,27 @@ if command -v systemctl &>/dev/null; then
     systemctl is-active --quiet jt-glogarch 2>/dev/null && WAS_ACTIVE=yes
 fi
 
+# --- TLS / proxy options (for corporate MITM proxies or a broken CA store) ---
+#   --ca-bundle <file>   verify against a custom CA (e.g. the proxy root CA)
+#   --insecure           skip TLS verification for this run (like 'curl -k')
+# Both also readable from the environment (JT_CA_BUNDLE / JT_INSECURE).
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --ca-bundle) JT_CA_BUNDLE="$2"; shift 2 ;;
+        --ca-bundle=*) JT_CA_BUNDLE="${1#*=}"; shift ;;
+        --insecure) JT_INSECURE=1; shift ;;
+        -h|--help)
+            echo "Usage: sudo bash deploy/install.sh [--ca-bundle <file>] [--insecure]"
+            exit 0 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+if [ -f "$INSTALL_DIR/deploy/tls-env.sh" ]; then
+    source "$INSTALL_DIR/deploy/tls-env.sh"
+else
+    export GIT_TERMINAL_PROMPT=0; GIT_TLS_OPTS=""; PIP_TLS_OPTS=""
+fi
+
 # Check Python version
 if ! command -v python3 &>/dev/null; then
     echo "Error: python3 not found. Please install Python 3.10+"
@@ -76,17 +97,17 @@ usermod -aG systemd-journal "$SERVICE_USER" 2>/dev/null || true
 # Ensure setuptools is new enough to read pyproject.toml metadata
 echo ""
 echo "Upgrading setuptools and wheel..."
-$PIP install $PIP_FLAGS --upgrade "setuptools>=68.0" wheel 2>&1 | tail -1
+$PIP install $PIP_TLS_OPTS $PIP_FLAGS --upgrade "setuptools>=68.0" wheel 2>&1 | tail -1
 
 # Install Python dependencies and package
 # Clean any stale build artifacts to ensure latest code is installed
 rm -rf "$INSTALL_DIR/build" "$INSTALL_DIR"/*.egg-info 2>/dev/null
 echo ""
 echo "Installing jt-glogarch and dependencies..."
-$PIP install $PIP_FLAGS --no-build-isolation --no-cache-dir --force-reinstall --no-deps "$INSTALL_DIR"
+$PIP install $PIP_TLS_OPTS $PIP_FLAGS --no-build-isolation --no-cache-dir --force-reinstall --no-deps "$INSTALL_DIR"
 # Install runtime deps + the [report] extra (Playwright) so PDF Reports work
 # out of the box. Bracket-extra syntax requires the path quoted.
-$PIP install $PIP_FLAGS --no-build-isolation --no-cache-dir "$INSTALL_DIR"[report]
+$PIP install $PIP_TLS_OPTS $PIP_FLAGS --no-build-isolation --no-cache-dir "$INSTALL_DIR"[report]
 echo ""
 echo "Python packages installed OK"
 
