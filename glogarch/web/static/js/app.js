@@ -631,12 +631,35 @@ async function batchImport() {
     window._batchImportIds = ids;
     applyI18n();
     _autofillImportModal();
+    _applyImportDataNodeLock();
 }
 
 // Pre-fill the import dialog's target fields from the saved restore-target
 // defaults (系統設定 → 匯入預設目標). Only fills empty fields so it never
 // clobbers something the user already typed. Secrets come back masked; the
 // import endpoint substitutes the real stored secret for a masked value.
+// Data Node can't reach OpenSearch _bulk → disable Bulk import and force GELF.
+async function _applyImportDataNodeLock() {
+    let dn = window._hasDataNode;
+    if (dn === undefined) {
+        try { const s = await fetchJSON(`${API}/servers`); dn = (s.items || []).some(x => x.has_datanode); window._hasDataNode = dn; }
+        catch (e) { dn = false; }
+    }
+    const bulkRadio = document.querySelector('input[name="import-mode"][value="bulk"]');
+    if (!bulkRadio) return;
+    const bulkLabel = bulkRadio.closest('.mode-option');
+    if (dn) {
+        bulkRadio.disabled = true;
+        if (bulkLabel) { bulkLabel.style.opacity = '0.5'; bulkLabel.title = t('datanode_warning'); }
+        const gelfRadio = document.querySelector('input[name="import-mode"][value="gelf"]');
+        if (gelfRadio && !gelfRadio.checked) gelfRadio.checked = true;
+        onImportModeChange('gelf');
+    } else {
+        bulkRadio.disabled = false;
+        if (bulkLabel) { bulkLabel.style.opacity = ''; bulkLabel.title = ''; }
+    }
+}
+
 async function _autofillImportModal() {
     let c;
     try { c = await fetchJSON(`${API}/config/import-defaults`); } catch (e) { return; }
@@ -1005,6 +1028,7 @@ function importSingle(archiveId) {
     modal.style.display = 'flex';
     applyI18n();
     _autofillImportModal();
+    _applyImportDataNodeLock();
 }
 
 function closeImportModal() {
@@ -1310,13 +1334,18 @@ async function loadExportPage() {
         onExportModeChange();
     } catch (e) {}
 
-    // Load servers
+    // Load servers (from /api/servers — carries per-server Data Node flag).
     try {
-        const status = await fetchJSON(`${API}/status`);
+        const servers = await fetchJSON(`${API}/servers`);
+        const items = servers.items || [];
+        window._exportServerDN = {};
+        items.forEach(s => { window._exportServerDN[s.name] = !!s.has_datanode; });
         const sel = document.getElementById('export-server');
         if (sel) {
-            sel.innerHTML = status.servers.map(s => `<option value="${s.name}">${s.name} (${s.url})</option>`).join('');
+            sel.innerHTML = items.map(s =>
+                `<option value="${esc(s.name)}">${esc(s.name)} (${esc(s.url)})${s.has_datanode ? ' — Data Node' : ''}</option>`).join('');
         }
+        onExportServerChange();   // apply the Data Node lock for the initial server
     } catch (e) {}
 
     // Load streams and index sets
@@ -1405,6 +1434,25 @@ function onExportRangeChange() {
     document.getElementById('export-custom-group').style.display = type === 'custom' ? 'block' : 'none';
 }
 
+// Selected export server is a Data Node → OpenSearch Direct is unreachable, so
+// lock the export to Graylog API (disable the OpenSearch option) instead of just
+// warning about it. Falls back to enabling it for a standalone-OpenSearch server.
+function onExportServerChange() {
+    const srvSel = document.getElementById('export-server');
+    const modeSel = document.getElementById('export-mode');
+    if (!modeSel) return;
+    const isDN = !!(srvSel && window._exportServerDN && window._exportServerDN[srvSel.value]);
+    const osOpt = modeSel.querySelector('option[value="opensearch"]');
+    if (osOpt) osOpt.disabled = isDN;
+    if (isDN && modeSel.value === 'opensearch') modeSel.value = 'api';
+    onExportModeChange();
+}
+
+function _selectedExportServerIsDN() {
+    const srvSel = document.getElementById('export-server');
+    return !!(srvSel && window._exportServerDN && window._exportServerDN[srvSel.value]);
+}
+
 function onExportModeChange() {
     const mode = document.getElementById('export-mode')?.value;
     const streamGroup = document.getElementById('export-stream-group');
@@ -1416,12 +1464,14 @@ function onExportModeChange() {
     if (streamGroup) streamGroup.style.display = mode === 'api' ? 'block' : 'none';
     if (hint) {
         let hintText = mode === 'api' ? t('export_mode_api_hint') : t('export_mode_os_hint');
-        // Show Data Node warning for OpenSearch mode
-        if (mode === 'opensearch' && window._hasDataNode) {
+        const dn = _selectedExportServerIsDN();
+        // Data Node: OpenSearch Direct is disabled → explain why the export is
+        // locked to Graylog API. Also keep the plain warning if OS is somehow shown.
+        if (dn || (mode === 'opensearch' && window._hasDataNode)) {
             hintText += '\n\n' + t('datanode_warning');
         }
         hint.textContent = hintText;
-        hint.style.color = mode === 'opensearch' ? 'var(--warning)' : '';
+        hint.style.color = (dn || mode === 'opensearch') ? 'var(--warning)' : '';
     }
     // OpenSearch: hide time range selector, show index picker in coverage
     if (rangeGroup) rangeGroup.style.display = mode === 'api' ? 'block' : 'none';
