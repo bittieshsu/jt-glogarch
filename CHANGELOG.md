@@ -2,6 +2,18 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.11.1] - 2026-07-07
+
+### Changed
+
+- **Data Node locks the mode instead of just warning.** When the selected export
+  server is a Graylog Data Node (which doesn't expose OpenSearch), the export mode
+  is now forced to Graylog API and the **OpenSearch Direct option is disabled**
+  (not merely flagged with a warning). Likewise the import dialog **disables Bulk
+  and forces GELF** in a Data Node environment. This removes the footgun of
+  picking a mode that can't work on Data Node. Standalone-OpenSearch servers are
+  unaffected (both modes stay available).
+
 ## [1.11.0] - 2026-07-07
 
 ### Import (restore) dialog
