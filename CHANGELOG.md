@@ -2,6 +2,17 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.12.8] - 2026-07-10
+
+### Fixed
+
+- **`install-report-engine.sh` works on Ubuntu 24.04 / Debian 12+.** It failed
+  with `error: externally-managed-environment` (PEP 668); it now auto-adds
+  `--break-system-packages` when the marker is present and retries with
+  `--ignore-installed` if a dependency is distro-managed. It also installs the
+  **full report engine** (Playwright **+ PyMuPDF + Pillow**), not just Playwright,
+  so post-processing (TOC/watermark) and image slicing work.
+
 ## [1.12.7] - 2026-07-10
 
 ### Changed / Added
