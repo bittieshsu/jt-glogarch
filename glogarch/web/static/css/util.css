@@ -45,6 +45,7 @@
 
 /* text colour */
 .text-muted { color: var(--text-muted); }
+.kbd { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: var(--input-bg); border: 1px solid var(--border); border-radius: 4px; padding: 2px 6px; font-size: 0.9em; word-break: break-all; }
 .text-danger { color: var(--danger); }
 .text-warning { color: var(--warning); }
 .text-success { color: var(--success); }

@@ -312,7 +312,7 @@ async function loadOpenSearchStatus() {
             }).join(' ');
             el.innerHTML = labels;
         } else {
-            el.innerHTML = `<span class="u030">${t('opensearch_not_configured')}</span>`;
+            el.innerHTML = `<span class="u030">${t('opensearch_not_configured')}</span> <span class="text-muted">${t('opensearch_optional_note')}</span>`;
         }
     } catch (e) {}
 }
@@ -3568,12 +3568,17 @@ async function loadReportsPage() {
     if (warn) {
         if (status && status.render_engine === false) {
             warn.className = 'report-warn mb15';
-            warn.textContent = t('reports_engine_missing');
+            warn.innerHTML = `${t('reports_engine_missing')} <button type="button" class="btn-sm btn-secondary" data-act="showReportEngineHelp">${t('reports_engine_howto')}</button>`;
         } else { warn.className = 'hidden'; }
     }
     renderReportsTable(defs.items || []);
     renderReportHistory(hist.items || []);
     applyI18n();
+}
+
+// Show how to install the optional PDF render engine (custom modal, not native).
+function showReportEngineHelp() {
+    showConfirm(t('reports_engine_help_title'), t('reports_engine_help_body'), null);
 }
 
 function renderReportsTable(items) {

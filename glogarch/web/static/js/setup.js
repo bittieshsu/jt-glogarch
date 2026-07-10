@@ -8,6 +8,19 @@ const $ = id => document.getElementById(id);
 function showError(msg) { const e = $('setup-error'); e.textContent = msg; e.classList.toggle('hidden', !msg); }
 function busy(on) { $('setup-busy').textContent = on ? (t('setup_saving') || 'Saving...') : ''; $('btn-next').disabled = on; }
 
+// Step 3's OpenSearch host example follows the Graylog host entered in step 2
+// (same host/FQDN, port 9200) — deployments usually co-locate them.
+function osHostPlaceholderFromGraylog() {
+    const ta = $('s3-hosts');
+    if (!ta) return;
+    const raw = ($('s2-url') && $('s2-url').value || '').trim();
+    let host = '';
+    if (raw) {
+        try { host = new URL(raw.includes('://') ? raw : 'http://' + raw).hostname; } catch (e) {}
+    }
+    ta.setAttribute('placeholder', host ? `http://${host}:9200` : 'http://192.168.1.10:9200');
+}
+
 function render() {
     document.querySelectorAll('.setup-step').forEach(el => {
         el.classList.toggle('hidden', Number(el.dataset.step) !== step);
@@ -21,6 +34,7 @@ function render() {
     // innerHTML (not textContent) so the leading icon survives the re-render.
     $('btn-next').innerHTML = icon(step === TOTAL ? 'login' : 'arrow_right') + ' ' +
         ((step === TOTAL) ? t('setup_finish') : t('setup_next'));
+    osHostPlaceholderFromGraylog();   // step 3 example follows the step-2 Graylog host
     $('setup-progress').textContent = `${t('setup_step')} ${Math.min(step, TOTAL)} ${t('setup_of')} ${TOTAL}`;
     showError('');
 }
