@@ -2,6 +2,19 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.12.7] - 2026-07-10
+
+### Changed / Added
+
+- **Setup wizard: the OpenSearch host example follows the Graylog host** entered
+  in the previous step (same host/FQDN, port 9200) instead of a fixed placeholder.
+- **Dashboard: the OpenSearch "Not configured" note explains it's optional** —
+  archiving falls back to Graylog API mode when OpenSearch isn't set (shown as a
+  muted note, not an alarm).
+- **Reports: the "render engine not installed" warning has a "How to install"
+  button** that opens a modal with the exact install command
+  (`install-report-engine.sh`).
+
 ## [1.12.6] - 2026-07-09
 
 ### Fixed
