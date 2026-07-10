@@ -20,8 +20,24 @@ set -e
 BROWSERS_PATH=/opt/jt-glogarch/.playwright
 SVC_USER=jt-glogarch
 
-echo "==> Installing Playwright (Python)"
-pip install --no-cache-dir "playwright>=1.40"
+# PEP 668 (Ubuntu 24.04 / Debian 12+ ship EXTERNALLY-MANAGED): pip refuses a
+# system install without --break-system-packages. jt-glogarch is a dedicated,
+# single-purpose install so writing into the system Python is intended — pass
+# the flag automatically when the marker is present (older distros are unaffected).
+PIP_FLAGS=""
+EM_FILE=$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"] + "/EXTERNALLY-MANAGED")' 2>/dev/null || true)
+if [ -n "$EM_FILE" ] && [ -f "$EM_FILE" ]; then
+    PIP_FLAGS="--break-system-packages"
+    echo "==> Detected PEP 668 (EXTERNALLY-MANAGED) — using --break-system-packages"
+fi
+
+# The report engine needs Playwright (render) + PyMuPDF (post-process) + Pillow
+# (image slicing) — the whole [report] extra, not just Playwright.
+echo "==> Installing report engine packages (Playwright + PyMuPDF + Pillow)"
+if ! python3 -m pip install $PIP_FLAGS --no-cache-dir "playwright>=1.40" "pymupdf>=1.24" "pillow>=10.0"; then
+    echo "  (a dependency is distro-managed — retrying with --ignore-installed)"
+    python3 -m pip install $PIP_FLAGS --ignore-installed --no-cache-dir "playwright>=1.40" "pymupdf>=1.24" "pillow>=10.0"
+fi
 
 echo "==> Installing Chromium into ${BROWSERS_PATH}"
 mkdir -p "${BROWSERS_PATH}"

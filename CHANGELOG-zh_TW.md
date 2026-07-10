@@ -2,6 +2,16 @@
 
 jt-glogarch 所有重要變更皆記錄於此檔案。
 
+## [1.12.8] - 2026-07-10
+
+### 修正
+
+- **`install-report-engine.sh` 可在 Ubuntu 24.04 / Debian 12+ 正常執行。** 原本會以
+  `error: externally-managed-environment`（PEP 668）失敗;現在偵測到標記時會自動加
+  `--break-system-packages`,並在相依套件為發行版管理時以 `--ignore-installed` 重試。
+  也改為安裝**完整報表引擎**（Playwright **+ PyMuPDF + Pillow**）而非僅 Playwright,
+  讓後處理（目錄／浮水印）與切圖都能運作。
+
 ## [1.12.7] - 2026-07-10
 
 ### 變更／新增
