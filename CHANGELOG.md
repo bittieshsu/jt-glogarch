@@ -2,6 +2,18 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.13.10] - 2026-07-12
+
+### Fixed
+
+- **Screenshot mode: dashboard slices no longer cut through a widget.** The
+  page-break snap relied on pixel brightness, but a data table's internal white
+  rows look identical to a real inter-card gutter, so a cut could land mid-widget
+  (continued on the next page). Now `capture_dashboard_png` reads the actual
+  widget-row boundaries from the rendered grid (`.react-grid-item` positions) and
+  `slice_tall_png` cuts on those — a widget that would overflow the page moves
+  WHOLE to the next page. (Pixel-gutter heuristic kept as a fallback.)
+
 ## [1.13.9] - 2026-07-11
 
 ### Fixed
