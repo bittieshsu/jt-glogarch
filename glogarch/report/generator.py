@@ -95,8 +95,13 @@ async def generate_report(db, settings, cfg: dict, *, triggered_by: str = "manua
         # rebuild (only whole-day durations snap; e.g. a "last 2 hours" widget is
         # left as-is).
         snap_per_widget = want_midnight and use_dash_time
-        web_user = cfg.get("graylog_web_username", "")
-        web_pass = cfg.get("graylog_web_password", "")
+        # Screenshot mode drives a real browser through Graylog's Web UI login
+        # form (username + password) — an API token can't authenticate a browser
+        # session. So fall back to the SERVER connection's own username/password
+        # when the report leaves the web fields blank; only a token-only server
+        # actually needs them entered here.
+        web_user = cfg.get("graylog_web_username") or (server.username if server else "") or ""
+        web_pass = cfg.get("graylog_web_password") or (server.password if server else "") or ""
         for dash in dashboards:
             did = dash.get("id") if isinstance(dash, dict) else dash
             dtitle = dash.get("title") if isinstance(dash, dict) else did
