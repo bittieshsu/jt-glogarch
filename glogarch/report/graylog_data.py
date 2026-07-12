@@ -110,11 +110,35 @@ async def get_graylog_version(server) -> str:
     return ""
 
 
+# Read the y-gaps BETWEEN widget rows of a rendered react-grid-layout dashboard,
+# as fractions of the grid height — so slice_tall_png can cut on widget-row
+# boundaries. Groups grid items into rows by vertical overlap; a boundary is the
+# midpoint of the gap between consecutive rows.
+_ROW_BOUNDARY_JS = """(g)=>{
+  const gr = g.getBoundingClientRect();
+  const H = g.scrollHeight || gr.height;
+  const items = Array.from(g.querySelectorAll('.react-grid-item'));
+  if(!items.length) return [];
+  const boxes = items.map(el=>{const r=el.getBoundingClientRect();
+    return {top:(r.top-gr.top)+g.scrollTop, bot:(r.bottom-gr.top)+g.scrollTop};});
+  boxes.sort((a,b)=>a.top-b.top);
+  const rows=[];
+  for(const b of boxes){
+    const last=rows[rows.length-1];
+    if(last && b.top < last.bot-5){ last.bot=Math.max(last.bot,b.bot); last.top=Math.min(last.top,b.top); }
+    else rows.push({top:b.top, bot:b.bot});
+  }
+  const out=[];
+  for(let i=0;i<rows.length-1;i++){ out.push(((rows[i].bot+rows[i+1].top)/2)/H); }
+  return out;
+}"""
+
+
 async def capture_dashboard_png(
     server, dashboard_id: str, *, web_username: str, web_password: str,
     time_range_seconds: int = 86400, wait_ms: int = 6000,
     abs_from=None, abs_to=None,
-) -> tuple[bytes | None, str]:
+) -> tuple[bytes | None, str, list]:
     """Log into the Graylog web UI with the given web credentials and screenshot
     a dashboard. Returns (PNG bytes, "") on success or (None, reason) on failure
     so the caller can show WHY the capture failed instead of a generic note.
@@ -143,7 +167,7 @@ async def capture_dashboard_png(
                     await page.wait_for_selector(user_sel, timeout=15000)
                 except Exception:
                     return None, ("Graylog login form not found — is the web URL correct "
-                                  f"and reachable? ({base})")
+                                  f"and reachable? ({base})"), []
                 await page.fill(user_sel, web_username)
                 await page.fill(pass_sel, web_password)
                 # Submit + press Enter (some Graylog builds only submit on Enter).
@@ -166,8 +190,8 @@ async def capture_dashboard_png(
                     if await page.query_selector(user_sel):
                         return None, ("Graylog web login did not complete — check the "
                                       "web username/password (these are the Graylog UI "
-                                      "login, not the API token).")
-                    return None, "Dashboard did not finish loading after login (timed out)."
+                                      "login, not the API token)."), []
+                    return None, "Dashboard did not finish loading after login (timed out).", []
                 await page.wait_for_load_state("networkidle")
                 await page.wait_for_timeout(wait_ms)
                 # Apply the report's absolute time window to the LIVE dashboard so
@@ -222,18 +246,26 @@ async def capture_dashboard_png(
                 # they are all on-screen.
                 await page.wait_for_timeout(4000)
                 grid = await page.query_selector(grid_sel) if grid_sel else None
+                # Read the pixel gaps BETWEEN widget rows from the rendered grid so
+                # the tall screenshot can be sliced on widget-row boundaries (never
+                # mid-widget). Returned as fractions of the grid height.
+                boundaries = []
                 if grid:
+                    try:
+                        boundaries = await page.evaluate(_ROW_BOUNDARY_JS, grid) or []
+                    except Exception:
+                        boundaries = []
                     png = await grid.screenshot()
                 else:
                     png = await page.screenshot(full_page=True)
                 if not png:
-                    return None, "Screenshot produced no image."
-                return png, ""
+                    return None, "Screenshot produced no image.", []
+                return png, "", boundaries
             finally:
                 await browser.close()
     except Exception as e:
         log.warning("capture_dashboard_png failed", dashboard=dashboard_id, error=str(e))
-        return None, f"Capture error: {e}"
+        return None, f"Capture error: {e}", []
 
 
 async def _apply_absolute_override(page, dt_from, dt_to) -> bool:
@@ -362,7 +394,8 @@ async def _autoscroll_dashboard(page):
         pass
 
 
-def slice_tall_png(png: bytes, first_ratio: float = 1.15, rest_ratio: float = 1.42) -> list[str]:
+def slice_tall_png(png: bytes, first_ratio: float = 1.15, rest_ratio: float = 1.42,
+                   row_boundaries=None) -> list[str]:
     """Split a tall dashboard screenshot into page-sized data-URIs. The FIRST
     slice is shorter (first_ratio) because it shares its page with the section
     title + description; later slices sit on their own page (rest_ratio). Ratios
@@ -400,21 +433,26 @@ def slice_tall_png(png: bytes, first_ratio: float = 1.15, rest_ratio: float = 1.
         row_spread = None
 
     def _snap(target, floor):
-        """Nearest clean (min-spread) cut row in (floor, target]; falls back to
-        target when spread data is unavailable."""
+        """Cut at the DEEPEST full-width gap at or above `target` so a widget row
+        that would overflow the page moves WHOLE to the next slice (never split
+        mid-widget). A gap row is a near-uniform, full-width background row (low
+        per-row spread). Searches the entire [floor, target] range (not a tiny
+        window); only falls back to `target` when there is genuinely no gap there
+        (a single widget taller than the page)."""
         if not row_spread:
             return min(target, h)
         hi = min(target, h - 1)
-        lo = max(floor, target - int(w * 0.18))   # search window above target
-        if lo >= hi:
-            return min(target, h)
-        best_r, best_s = hi, row_spread[hi]
+        lo = max(1, floor)
+        GAP = 10                                   # spread <= this ⇒ background row
         for r in range(hi, lo - 1, -1):
-            if row_spread[r] < best_s:
-                best_s, best_r = row_spread[r], r
-                if best_s == 0:
-                    break
-        return best_r
+            if row_spread[r] <= GAP:
+                return r                           # first (deepest) gap ≤ target
+        return min(target, h)
+
+    # Exact widget-row boundaries read from the rendered grid (fractions of grid
+    # height) → pixel rows. Preferred over the pixel-gutter heuristic because a
+    # data table's internal white rows look identical to a real inter-card gutter.
+    bpx = sorted(int(f * h) for f in (row_boundaries or []) if 0 < f < 1)
 
     slices = []
     y = 0
@@ -425,7 +463,14 @@ def slice_tall_png(png: bytes, first_ratio: float = 1.15, rest_ratio: float = 1.
         if target >= h:
             cut = h
         else:
-            cut = _snap(target, y + int(w * 0.35))   # keep slices from getting tiny
+            floor = y + int(w * 0.25)                # min slice height (avoid tiny)
+            cut = None
+            if bpx:                                  # cut on the deepest widget-row
+                cand = [b for b in bpx if floor <= b <= target]   # boundary ≤ target
+                if cand:
+                    cut = max(cand)
+            if cut is None:
+                cut = _snap(target, floor)           # pixel-gutter fallback
             if cut <= y:
                 cut = min(target, h)
         part = im.crop((0, y, w, min(cut, h)))

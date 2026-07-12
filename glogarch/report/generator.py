@@ -123,12 +123,13 @@ async def generate_report(db, settings, cfg: dict, *, triggered_by: str = "manua
                         cap_to = (now.replace(hour=0, minute=0, second=0, microsecond=0)
                                   if align_midnight_eff else now)
                         cap_from = cap_to - timedelta(seconds=trs)
-                    png, reason = await graylog_data.capture_dashboard_png(
+                    png, reason, row_bounds = await graylog_data.capture_dashboard_png(
                         server, did, web_username=web_user, web_password=web_pass,
                         time_range_seconds=trs, abs_from=cap_from, abs_to=cap_to)
                     if png:
-                        # A full dashboard capture is tall — slice it across pages.
-                        sec["img_slices"] = graylog_data.slice_tall_png(png)
+                        # A full dashboard capture is tall — slice it across pages,
+                        # cutting on widget-row boundaries so no widget is split.
+                        sec["img_slices"] = graylog_data.slice_tall_png(png, row_boundaries=row_bounds)
                     else:
                         sec["capture_error"] = reason or _t(lang, "no_capture")
                 sections.append(sec)
