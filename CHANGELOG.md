@@ -2,6 +2,18 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.13.11] - 2026-07-12
+
+### Changed
+
+- **Screenshot-mode reports reuse the server's own web login.** Screenshot mode
+  drives a real browser through Graylog's Web UI login form (username + password)
+  — an API token can't authenticate a browser session, which is why it needs web
+  credentials. The report now falls back to the **server connection's**
+  username/password when the report's web fields are blank, so you only fill them
+  in when that connection was set up with an **API token** (no reusable password).
+  A note in the dialog explains this.
+
 ## [1.13.10] - 2026-07-12
 
 ### Fixed

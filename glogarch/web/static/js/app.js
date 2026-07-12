@@ -3705,6 +3705,7 @@ async function openReportModal(name) {
           <div class="text-muted fs-08 mt3">${t('reports_heatval_hint')}</div></div>
       </div>
       <div id="rp-shot-creds"${cfg.dashboard_mode==='screenshot'?'':' class="hidden"'}>
+        <div class="text-muted fs-08 mb8">${t('reports_web_note')}</div>
         <div class="form-group"><label>${t('reports_f_webuser')}</label><input type="text" id="rp-webuser" value="${esc(cfg.graylog_web_username||'')}" autocomplete="off" placeholder="${t('reports_web_hint')}"></div>
         <div class="form-group"><label>${t('reports_f_webpass')}</label>${_reportSecret('rp-webpass', cfg.graylog_web_password)}</div>
       </div>
