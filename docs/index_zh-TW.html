@@ -281,6 +281,10 @@ sudo systemctl enable --now jt-glogarch</code></pre>
   <div id="lightbox" class="lightbox" hidden role="dialog" aria-modal="true" aria-label="畫面預覽">
     <button class="lightbox-close" type="button" aria-label="關閉">×</button>
     <img class="lightbox-img" src="" alt="完整畫面">
+    <div class="lb-track" hidden></div>
+    <button class="lb-nav lb-prev" type="button" aria-label="上一頁" hidden>‹</button>
+    <button class="lb-nav lb-next" type="button" aria-label="下一頁" hidden>›</button>
+    <div class="lb-counter" hidden></div>
   </div>
 </section>
 
@@ -288,11 +292,11 @@ sudo systemctl enable --now jt-glogarch</code></pre>
   <h2>產製統計報表</h2>
   <p class="subhead">一鍵把 Graylog 儀表板產製成品牌化的多頁 PDF 統計報表，支援排程與 Email 寄送，兩種產製模式。點一下就能翻閱整份報告。</p>
   <div class="shots">
-    <button class="shot" type="button" data-lightbox="reports/wazuh_rebuild_zhtw_full.png" data-tall>
+    <button class="shot" type="button" data-report="reports/pages/wazuh_rebuild_zhtw" data-count="5">
       <img class="ss-img" src="reports/wazuh_rebuild_zhtw.png" alt="重現版報表" loading="lazy">
       <div class="label">重現版<small>小工具重建為原生品牌化圖表——世界地圖、甜甜圈、趨勢</small></div>
     </button>
-    <button class="shot" type="button" data-lightbox="reports/wazuh_screenshot_zhtw_full.png" data-tall>
+    <button class="shot" type="button" data-report="reports/pages/wazuh_screenshot_zhtw" data-count="5">
       <img class="ss-img" src="reports/wazuh_screenshot_zhtw.png" alt="截圖版報表" loading="lazy">
       <div class="label">截圖版<small>像素級忠實擷取實際儀表板——每個頁籤、含世界地圖</small></div>
     </button>
@@ -348,15 +352,54 @@ sudo systemctl enable --now jt-glogarch</code></pre>
     const lb = document.getElementById('lightbox');
     if (!lb) return;
     const lbImg = lb.querySelector('.lightbox-img');
+    const track = lb.querySelector('.lb-track');
+    const prev = lb.querySelector('.lb-prev');
+    const next = lb.querySelector('.lb-next');
+    const counter = lb.querySelector('.lb-counter');
     const closeBtn = lb.querySelector('.lightbox-close');
-    const open = (src, tall) => { lbImg.src = src; lb.classList.toggle('tall', !!tall); lb.hidden = false; document.body.style.overflow = 'hidden'; };
-    const close = () => { lb.hidden = true; lbImg.src = ''; lb.classList.remove('tall'); document.body.style.overflow = ''; };
-    document.querySelectorAll('.shot[data-lightbox]').forEach(btn => {
-      btn.addEventListener('click', () => open(btn.dataset.lightbox, btn.hasAttribute('data-tall')));
-    });
+    let mode = 'img', total = 0;
+    const setCarousel = (on) => {
+      lbImg.hidden = on;
+      [track, prev, next, counter].forEach(el => { el.hidden = !on; });
+      lb.classList.toggle('viewer', on);
+    };
+    const updateCounter = (i) => {
+      counter.textContent = (i + 1) + ' / ' + total;
+      prev.disabled = i <= 0; next.disabled = i >= total - 1;
+    };
+    const openImg = (src) => { mode = 'img'; setCarousel(false); lbImg.src = src; lb.hidden = false; document.body.style.overflow = 'hidden'; };
+    const openReport = (base, count) => {
+      mode = 'carousel'; total = count; track.innerHTML = '';
+      for (let n = 1; n <= count; n++) {
+        const slide = document.createElement('div'); slide.className = 'lb-slide';
+        const im = document.createElement('img'); im.src = base + '_' + n + '.jpg';
+        im.alt = '第 ' + n + ' 頁'; im.loading = n > 1 ? 'lazy' : 'eager';
+        slide.appendChild(im); track.appendChild(slide);
+      }
+      setCarousel(true); lb.hidden = false; document.body.style.overflow = 'hidden';
+      track.scrollLeft = 0; updateCounter(0);
+    };
+    const idx = () => Math.round(track.scrollLeft / track.clientWidth);
+    const go = (d) => { const i = Math.min(total - 1, Math.max(0, idx() + d)); track.scrollTo({ left: i * track.clientWidth, behavior: 'smooth' }); };
+    const close = () => { lb.hidden = true; lbImg.src = ''; track.innerHTML = ''; lb.classList.remove('viewer'); document.body.style.overflow = ''; };
+    track.addEventListener('scroll', () => updateCounter(idx()));
+    prev.addEventListener('click', e => { e.stopPropagation(); go(-1); });
+    next.addEventListener('click', e => { e.stopPropagation(); go(1); });
+    track.addEventListener('click', e => { if (e.target === track || e.target.classList.contains('lb-slide')) close(); });
     closeBtn.addEventListener('click', close);
     lb.addEventListener('click', e => { if (e.target === lb) close(); });
-    document.addEventListener('keydown', e => { if (!lb.hidden && e.key === 'Escape') close(); });
+    document.addEventListener('keydown', e => {
+      if (lb.hidden) return;
+      if (e.key === 'Escape') close();
+      else if (mode === 'carousel' && e.key === 'ArrowLeft') go(-1);
+      else if (mode === 'carousel' && e.key === 'ArrowRight') go(1);
+    });
+    document.querySelectorAll('.shot[data-lightbox]').forEach(btn => {
+      btn.addEventListener('click', () => openImg(btn.dataset.lightbox));
+    });
+    document.querySelectorAll('.shot[data-report]').forEach(btn => {
+      btn.addEventListener('click', () => openReport(btn.dataset.report, parseInt(btn.dataset.count || '1', 10)));
+    });
   })();
   (function () {
     const nav = document.getElementById('nav');
