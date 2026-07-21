@@ -316,6 +316,15 @@ class OpenSearchExporter:
             # not recorded, so it retries next run — but the operator must still
             # see that this run was partial rather than a misleading green.
             note_parts = []
+            # Index-set coverage — surface the multi-index-set scope on the job
+            # itself (was log-only). A non-empty skip list is a data-integrity
+            # warning: those index sets were NOT archived this run.
+            if result.index_sets_skipped:
+                note_parts.append(
+                    f"⚠ Archived {len(prefixes)} index set(s); NOT covered: "
+                    f"{', '.join(result.index_sets_skipped)} — their logs are not archived")
+            else:
+                note_parts.append(f"Covered all {len(prefixes)} index set(s)")
             if result.chunks_skipped > 0:
                 note_parts.append(f"Skipped {result.chunks_skipped} indices (already archived)")
             if result.errors:

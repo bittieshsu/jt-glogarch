@@ -598,6 +598,35 @@
     color: var(--text);
 }
 
+/* Per-server OpenSearch rows on the dashboard (multi-cluster view) */
+.os-server-row {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border);
+}
+.os-server-row:last-child { border-bottom: none; }
+.os-server-name {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-weight: 600;
+    min-width: 140px;
+}
+.os-hosts { display: inline-flex; flex-wrap: wrap; align-items: center; }
+.os-src {
+    font-size: 0.72em;
+    padding: 2px 8px;
+    border-radius: 10px;
+    letter-spacing: 0.3px;
+    border: 1px solid var(--border);
+    cursor: help;
+}
+.os-src-own { background: rgba(80, 200, 120, 0.14); color: #2f9e5e; border-color: rgba(80, 200, 120, 0.35); }
+.os-src-global { background: rgba(160, 160, 170, 0.14); color: var(--text-dim); }
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {

@@ -303,24 +303,61 @@ async function loadDashboard() {
 // ---- OpenSearch ----
 async function loadOpenSearchStatus() {
     try {
-        const data = await fetchJSON(`${API}/opensearch/status`);
         const el = document.getElementById('opensearch-info');
         if (!el) return;
-        if (data.configured) {
-            const labels = data.hosts.map((h, i) => {
-                const isPrimary = i === 0;
-                const badge = isPrimary ? ` <span class="u075">&#9679; Primary</span>` : '';
-                return `<span class="host-label" oncontextmenu="showHostMenu(event,${i},${isPrimary})" title="${t('os_right_click')}">${icon('server')} ${esc(h)}${badge}</span>`;
-            }).join(' ');
-            el.innerHTML = labels;
-        } else {
-            el.innerHTML = `<span class="u030">${t('opensearch_not_configured')}</span> <span class="text-muted">${t('opensearch_optional_note')}</span>`;
+        let servers = [];
+        try { servers = (await fetchJSON(`${API}/servers`)).items || []; } catch (_) {}
+        // Per-server view: show EACH Graylog server's resolved OpenSearch cluster
+        // (its own per-server block, or the global fallback). A multi-cluster setup
+        // used to hide every server except the global one — making users think the
+        // others were on API mode.
+        if (Array.isArray(servers) && servers.length) {
+            const rows = [];
+            for (const s of servers) {
+                let data = null;
+                try { data = await fetchJSON(`${API}/opensearch/status?server=${encodeURIComponent(s.name)}`); } catch (_) {}
+                rows.push(renderOsServerRow(s.name, data));
+            }
+            el.innerHTML = rows.join('');
+            return;
         }
+        // Fallback (no server list): single global status.
+        const data = await fetchJSON(`${API}/opensearch/status`);
+        el.innerHTML = data.configured ? renderOsServerRow(null, data)
+            : `<span class="u030">${t('opensearch_not_configured')}</span> <span class="text-muted">${t('opensearch_optional_note')}</span>`;
     } catch (e) {}
 }
 
-function showHostMenu(e, idx, isPrimary) {
+function renderOsServerRow(serverName, data) {
+    const nameLabel = serverName
+        ? `<span class="os-server-name">${icon('server')} ${esc(serverName)}</span>` : '';
+    if (!data || !data.configured) {
+        return `<div class="os-server-row">${nameLabel} <span class="u030">${t('opensearch_not_configured')}</span></div>`;
+    }
+    let src = '';
+    if (serverName) {
+        src = data.source === 'per-server'
+            ? ` <span class="os-src os-src-own" title="${t('os_src_perserver_hint')}">${t('os_src_perserver')}</span>`
+            : ` <span class="os-src os-src-global" title="${t('os_src_global_hint')}">${t('os_src_global')}</span>`;
+    }
+    const multi = data.hosts.length > 1;
+    const hosts = data.hosts.map((h, i) => {
+        // "Node 1" marks the first failover node WITHIN this cluster (only shown
+        // when a cluster actually has >1 node) — not a "primary cluster".
+        const badge = (multi && i === 0)
+            ? ` <span class="u075" title="${t('os_primary_hint')}">&#9679; ${t('os_primary')}</span>` : '';
+        const sv = serverName || '';
+        return `<span class="host-label" data-server="${esc(sv)}" data-idx="${i}" data-count="${data.hosts.length}" oncontextmenu="showHostMenu(event)" title="${t('os_right_click')}">${icon('server')} ${esc(h)}${badge}</span>`;
+    }).join(' ');
+    return `<div class="os-server-row">${nameLabel}${src} <span class="os-hosts">${hosts}</span></div>`;
+}
+
+function showHostMenu(e) {
     e.preventDefault();
+    const elx = e.currentTarget;
+    const server = (elx && elx.dataset.server) || '';
+    const idx = parseInt((elx && elx.dataset.idx) || '0', 10);
+    const count = parseInt((elx && elx.dataset.count) || '1', 10);
     // Remove existing menu
     const old = document.getElementById('host-context-menu');
     if (old) old.remove();
@@ -332,11 +369,12 @@ function showHostMenu(e, idx, isPrimary) {
     menu.style.top = e.pageY + 'px';
 
     let items = '';
-    if (!isPrimary) {
-        items += `<div class="context-menu-item" data-act="osSetPrimary" data-args="[${idx}]">${icon('shield')} ${t('os_set_primary')}</div>`;
+    // Reordering only means something for a multi-node cluster's non-first node.
+    if (count > 1 && idx > 0) {
+        items += `<div class="context-menu-item" data-act="osSetPrimary" data-args="${esc(JSON.stringify([server, idx]))}">${icon('shield')} ${t('os_set_primary')}</div>`;
     }
-    items += `<div class="context-menu-item" data-act="osTestSingle" data-args="[${idx}]">${icon('refresh')} ${t('btn_test_connection')}</div>`;
-    if (isPrimary) {
+    items += `<div class="context-menu-item" data-act="osTestSingle" data-args="${esc(JSON.stringify([server, idx]))}">${icon('refresh')} ${t('btn_test_connection')}</div>`;
+    if (count > 1 && idx === 0) {
         items += `<div class="context-menu-item disabled">${icon('shield')} ${t('os_is_primary')}</div>`;
     }
 
@@ -352,12 +390,12 @@ function showHostMenu(e, idx, isPrimary) {
     }, 10);
 }
 
-async function osSetPrimary(idx) {
+async function osSetPrimary(server, idx) {
     try {
         await fetchJSON(`${API}/opensearch/reorder`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({from_index: idx, to_index: 0}),
+            body: JSON.stringify({server: server || null, from_index: idx, to_index: 0}),
         });
         loadOpenSearchStatus();
     } catch (e) {
@@ -366,10 +404,11 @@ async function osSetPrimary(idx) {
     }
 }
 
-async function osTestSingle(idx) {
+async function osTestSingle(server, idx) {
     const resultEl = document.getElementById('opensearch-result');
     try {
-        const data = await fetchJSON(`${API}/opensearch/status`);
+        const q = server ? `?server=${encodeURIComponent(server)}` : '';
+        const data = await fetchJSON(`${API}/opensearch/status${q}`);
         const host = data.hosts[idx];
         resultEl.innerHTML = `<span class="spinner-text">${esc(host)}...</span>`;
         const res = await fetchJSON(`${API}/opensearch/test`, {

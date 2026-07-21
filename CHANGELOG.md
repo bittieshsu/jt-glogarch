@@ -2,6 +2,35 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.13.15] - 2026-07-22
+
+### Fixed
+
+- **Dashboard now shows EACH server's OpenSearch cluster (multi-cluster).** With
+  per-server `opensearch:` blocks, the dashboard's "OpenSearch" section only listed
+  the global block's cluster — per-server clusters were invisible, making users think
+  those servers ran in API mode. The backend already accepted `?server=`; the
+  dashboard now calls it per server and renders one row each, tagged **per-server**
+  or **global fallback**. (Archiving was always correct — this was display-only.)
+- **`/opensearch/reorder` is now server-aware.** "Set as primary" reordered the
+  *global* host list even when you clicked a per-server cluster's node; it now
+  reorders the correct server's block.
+
+### Changed
+
+- The OpenSearch node badge is now **"Node 1"** (shown only for multi-node clusters)
+  with a tooltip — it marks the first failover node *within a cluster*, which the old
+  "Primary" label could be misread as a "primary cluster" in multi-cluster setups.
+- **OpenSearch export jobs now record index-set coverage in the job note**
+  (`Covered all N index set(s)`, or `⚠ … NOT covered: …`) — previously log-only.
+
+### Added
+
+- **`glogarch schedule add`** — create a schedule from the CLI (previously only
+  `list`/`enable`/`disable`, forcing manual SQLite edits). Options: `--type`,
+  `--cron`, `--mode`, `--server`, `--days`, `--index-set`, `--stream`,
+  `--keep-indices`, `--disabled`. Restart the service to register it.
+
 ## [1.13.14] - 2026-07-19
 
 ### Fixed
