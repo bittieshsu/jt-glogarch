@@ -1366,10 +1366,25 @@ async def opensearch_status(request: Request, server: str | None = None):
     settings = _settings(request)
     os_config = settings.get_opensearch(server)
     has_config = bool(os_config.hosts)
+    # Tell the UI whether this cluster came from the server's OWN opensearch block
+    # or the global fallback, so a multi-cluster dashboard can label each server
+    # correctly (and users don't misread a per-server cluster as "API mode").
+    source = "none"
+    if has_config:
+        source = "global"
+        if server:
+            try:
+                srv = settings.get_server(server)
+                if srv.opensearch is not None and srv.opensearch.hosts:
+                    source = "per-server"
+            except Exception:
+                pass
     return {
         "configured": has_config,
         "hosts": os_config.hosts,
         "export_mode": settings.export_mode,
+        "server": server,
+        "source": source,
     }
 
 
@@ -1425,25 +1440,48 @@ async def reorder_opensearch(request: Request):
     body = await request.json()
     from_idx = body.get("from_index", 0)
     to_idx = body.get("to_index", 0)
+    server = body.get("server") or None
     settings = _settings(request)
 
-    hosts = list(settings.opensearch.hosts)
+    # Reorder the correct cluster: the server's OWN opensearch block when it has
+    # one (multi-cluster), otherwise the global block. Reordering the global list
+    # when the user clicked a per-server node used to be a silent mistake.
+    target_server = None
+    if server:
+        try:
+            srv = settings.get_server(server)
+            if srv.opensearch is not None and srv.opensearch.hosts:
+                target_server = srv
+        except Exception:
+            target_server = None
+
+    hosts = list(target_server.opensearch.hosts if target_server else settings.opensearch.hosts)
     if from_idx < 0 or from_idx >= len(hosts) or to_idx < 0 or to_idx >= len(hosts):
         return JSONResponse({"error": "Invalid index"}, status_code=400)
 
     # Move host from from_idx to to_idx
     host = hosts.pop(from_idx)
     hosts.insert(to_idx, host)
-    settings.opensearch.hosts = hosts
 
-    # Save to config.yaml
     from glogarch.core.config_writer import update_config
     config_path = _config_path(request)
-    if config_path.exists():
-        update_config(config_path,
-                      lambda cfg: cfg.setdefault("opensearch", {}).update({"hosts": hosts}))
+    if target_server is not None:
+        target_server.opensearch.hosts = hosts
+        _sname = target_server.name
 
-    return {"hosts": hosts, "primary": hosts[0]}
+        def _mutate(cfg):
+            for s in cfg.get("servers", []) or []:
+                if s.get("name") == _sname:
+                    s.setdefault("opensearch", {})["hosts"] = hosts
+        if config_path.exists():
+            update_config(config_path, _mutate)
+    else:
+        settings.opensearch.hosts = hosts
+        if config_path.exists():
+            update_config(config_path,
+                          lambda cfg: cfg.setdefault("opensearch", {}).update({"hosts": hosts}))
+
+    return {"hosts": hosts, "primary": hosts[0], "server": server}
 
 
 @router.post("/opensearch/test")

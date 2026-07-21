@@ -2,6 +2,30 @@
 
 jt-glogarch 所有重要變更皆記錄於此檔案。
 
+## [1.13.15] - 2026-07-22
+
+### 修正
+
+- **儀表板現在會逐台顯示各伺服器的 OpenSearch 叢集（多叢集）。** 使用 per-server `opensearch:`
+  區塊時，儀表板的「OpenSearch」區塊原本只列出全域區塊那一台，per-server 的叢集完全不顯示，
+  害使用者誤以為那些伺服器走的是 API 模式。後端本來就支援 `?server=`；儀表板現在會逐台呼叫並各
+  渲染一列，標示 **各自設定** 或 **全域後備**。（歸檔一直都正確，這只是顯示層問題。）
+- **`/opensearch/reorder` 現在會依伺服器作用。** 「設為主要節點」原本即使你點的是 per-server
+  叢集的節點，也會去重排「全域」的主機清單；現在會重排正確伺服器的區塊。
+
+### 變更
+
+- OpenSearch 節點標籤改為 **「節點 1」**（只在多節點叢集時顯示）並加上 tooltip——它代表的是
+  「叢集內的第一個容錯節點」，舊的「主要節點」標籤在多叢集情境下容易被誤讀成「主要叢集」。
+- **OpenSearch export 作業現在會把 index set 涵蓋範圍寫進作業備註**
+  （`Covered all N index set(s)`，或 `⚠ … NOT covered: …`）——先前只在 log。
+
+### 新增
+
+- **`glogarch schedule add`** —— 可從 CLI 新增排程（先前只有 `list`／`enable`／`disable`，
+  逼使用者手動改 SQLite）。選項：`--type`、`--cron`、`--mode`、`--server`、`--days`、
+  `--index-set`、`--stream`、`--keep-indices`、`--disabled`。新增後需重啟服務才會註冊。
+
 ## [1.13.14] - 2026-07-19
 
 ### 修正

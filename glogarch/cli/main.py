@@ -841,12 +841,55 @@ def status():
 
 
 @cli.command()
-@click.argument("action", type=click.Choice(["list", "enable", "disable"]))
+@click.argument("action", type=click.Choice(["list", "enable", "disable", "add"]))
 @click.option("--name", "-n", default=None, help="Schedule name")
-def schedule(action: str, name: str | None):
-    """Manage export/cleanup schedules."""
+@click.option("--type", "sched_type", type=click.Choice(["export", "cleanup", "report_cleanup"]),
+              default="export", help="Schedule type (add)")
+@click.option("--cron", default=None, help="Cron expression, e.g. '0 3 * * *' (add)")
+@click.option("--mode", type=click.Choice(["opensearch", "api"]), default="opensearch",
+              help="Export mode (add, export type)")
+@click.option("--server", default=None, help="Graylog server name to bind (add) — else default_server")
+@click.option("--days", type=int, default=180, help="Look-back days (add, export type)")
+@click.option("--index-set", "index_set", multiple=True,
+              help="Restrict to index set ID(s); omit = ALL index sets (add)")
+@click.option("--stream", "streams", multiple=True, help="Restrict to stream ID(s) (add)")
+@click.option("--keep-indices", type=int, default=None, help="keep_indices for OpenSearch mode (add)")
+@click.option("--disabled", is_flag=True, default=False, help="Create the schedule disabled (add)")
+def schedule(action: str, name: str | None, sched_type: str, cron: str | None, mode: str,
+             server: str | None, days: int, index_set, streams, keep_indices, disabled: bool):
+    """Manage export/cleanup schedules (list / enable / disable / add)."""
     db = _get_db()
     settings = get_settings()
+
+    if action == "add":
+        import json as _json
+        from glogarch.core.models import ScheduleRecord
+        if not name or not cron:
+            console.print("[red]--name and --cron are required for add[/red]")
+            db.close(); return
+        if any(s.name == name for s in db.list_schedules()):
+            console.print(f"[red]Schedule '{name}' already exists[/red]")
+            db.close(); return
+        if sched_type == "export":
+            cfg = {"mode": mode, "days": days,
+                   "index_set": list(index_set) if index_set else "",
+                   "streams": list(streams), "auto_resume": True}
+            if server:
+                cfg["server"] = server
+            if keep_indices:
+                cfg["keep_indices"] = int(keep_indices)
+        elif sched_type == "cleanup":
+            cfg = {"retention_days": settings.retention.retention_days}
+        else:  # report_cleanup
+            cfg = {"days": 720}
+        rec = ScheduleRecord(name=name, job_type=sched_type, cron_expr=cron,
+                             config_json=_json.dumps(cfg), enabled=not disabled)
+        db.save_schedule(rec)
+        console.print(f"[green]Schedule '{name}' added[/green] (type={sched_type}, cron='{cron}', "
+                      f"enabled={not disabled}).")
+        console.print("[yellow]Restart the service to register it with the scheduler:[/yellow] "
+                      "systemctl restart jt-glogarch")
+        db.close(); return
 
     if action == "list":
         schedules = db.list_schedules()
