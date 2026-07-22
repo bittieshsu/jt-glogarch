@@ -91,6 +91,15 @@ Run these after all automated tests pass:
 
 ### Archive Round-Trip — MANDATORY every release
 
+This is a **hard release gate**: a green `pytest` run does NOT prove the export /
+import pipeline works — the unit suite is mocked. A release is not "done" until this
+prints `RESULT: ALL PASS`.
+
+> First install the **current build** on the test host
+> (`pip install --force-reinstall --no-deps ...`) and confirm
+> `python3 -c "import glogarch; print(glogarch.__version__)"` shows the release
+> version — otherwise you are testing stale code.
+
 Run the real end-to-end archive pipeline against a live Graylog + OpenSearch
 (needs a GELF TCP input on `GELF_PORT`; uses throwaway `/tmp` configs/DBs):
 
