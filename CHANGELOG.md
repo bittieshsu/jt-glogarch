@@ -2,6 +2,30 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.13.20] - 2026-07-23
+
+### Fixed
+
+- **Import must never wedge the target Graylog.** The throttle now watches the
+  **process/output ring buffers** — the earliest sign Graylog can't drain to
+  OpenSearch (they fill at ~65K, long before the journal shows a big backlog).
+  Buffer ≥ 70% → slow, ≥ 90% → pause. This stops an import from filling the journal
+  and jamming Graylog in the first place.
+- **Preflight now refuses to start an import into an already-jammed Graylog.** If the
+  process/output buffer is ≥ 90% full (OpenSearch not keeping up) the import is
+  blocked with a clear message (≥ 70% warns) — so you never start an import that
+  would stall and make Graylog worse.
+- **JVM-heap throttle no longer false-triggers on a healthy Graylog.** Graylog with
+  G1GC idles at 80–95% heap by design, so the old 80/92% thresholds would have
+  throttled *every* import. Heap is now a high near-OOM safety net (slow ≥ 95%,
+  pause ≥ 98%); the ring buffers are the reliable signal.
+- **Import progress memory leak.** The import progress event list grew unbounded (the
+  export path already pruned); a multi-million-record import could balloon service
+  memory. Now capped to the last ~100 events like export.
+
+Live in the import view: the journal badge now also shows **Buffer%** and **Heap%**
+so you can see exactly which signal is throttling.
+
 ## [1.13.19] - 2026-07-23
 
 ### Fixed

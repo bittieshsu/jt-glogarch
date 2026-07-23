@@ -2,6 +2,24 @@
 
 jt-glogarch 所有重要變更皆記錄於此檔案。
 
+## [1.13.20] - 2026-07-23
+
+### 修正
+
+- **匯入絕不可以把目標 Graylog 卡住。** 節流現在會盯著 **process／output ring buffer**——這是
+  Graylog 寫不進 OpenSearch 的最早訊號（buffer 約 65K 就塞滿，遠早於 journal 出現大量堆積）。
+  buffer ≥ 70% 放慢、≥ 90% 暫停，從源頭避免匯入把 journal 灌爆、把 Graylog 卡死。
+- **Preflight 會拒絕把資料匯入「已經塞住」的 Graylog。** 若 process／output buffer 已 ≥ 90%
+  （OpenSearch 跟不上），匯入會被擋下並明確提示（≥ 70% 則警告）——不會讓你啟動一個注定會卡住、
+  還把 Graylog 弄更糟的匯入。
+- **JVM heap 節流不再對「健康的 Graylog」誤判。** Graylog 用 G1GC 本來就常態在 80–95% heap，
+  舊的 80／92% 門檻會害「每一次」匯入都被節流。heap 現在只當高位近 OOM 的保險（≥ 95% 放慢、
+  ≥ 98% 暫停），真正可靠的訊號是 ring buffer。
+- **匯入進度記憶體洩漏。** 匯入的進度事件清單會無限成長（匯出早就有修剪）；百萬級匯入可能把服務
+  記憶體撐爆。現在跟匯出一樣只保留最後約 100 筆。
+
+匯入畫面上：journal 標籤旁現在也會顯示 **Buffer%** 與 **Heap%**，一眼看出是哪個訊號在節流。
+
 ## [1.13.19] - 2026-07-23
 
 ### 修正
