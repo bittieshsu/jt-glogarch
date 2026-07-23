@@ -125,6 +125,15 @@ class OpenSearchExporter:
                 guard = HealthGuard(None, self.export_config, progress_callback)  # disabled
 
             async with OpenSearchClient(self.os_config) as os_client:
+                # Grand total docs to export, ACCUMULATED across every prefix
+                # (index set). The job's denominator (messages_total) and the
+                # progress % must use this cumulative total — NOT a single
+                # prefix's count. `result.messages_total` (the numerator) is
+                # cumulative across all prefixes, so if the denominator were reset
+                # per-prefix the display would read "214M of 21M" (done > total)
+                # and the bar would pin at 99% once a later, smaller index set is
+                # reached. Accumulating keeps done <= total for the whole run.
+                grand_total_docs = 0
                 for prefix in prefixes:
                     if self._cancelled:
                         break
@@ -260,9 +269,14 @@ class OpenSearchExporter:
                             real_count = cat_count
                         accurate_list.append((idx_name, idx_from, idx_to, real_count))
                     export_list = accurate_list
-                    total_docs = sum(e[3] for e in export_list)
-                    log.info("Indices to export", count=total_to_export, total_docs=total_docs)
-                    self.db.update_job(job_id, messages_total=total_docs)
+                    prefix_total_docs = sum(e[3] for e in export_list)
+                    # Accumulate into the grand total; the denominator is the sum
+                    # across all prefixes processed so far, never a single prefix.
+                    grand_total_docs += prefix_total_docs
+                    total_docs = grand_total_docs
+                    log.info("Indices to export", count=total_to_export,
+                             prefix_total_docs=prefix_total_docs, grand_total_docs=grand_total_docs)
+                    self.db.update_job(job_id, messages_total=grand_total_docs)
 
                     # Second pass: export
                     for idx_num, (index_name, idx_from, idx_to, docs_count) in enumerate(export_list):

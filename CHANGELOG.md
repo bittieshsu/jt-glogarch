@@ -2,6 +2,22 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.13.25] - 2026-07-23
+
+### Fixed
+
+- **OpenSearch-direct export progress showed a nonsensical "done of total" and a
+  stuck 99% when exporting more than one index set.** The export loops over each
+  index-set prefix and was resetting the job's denominator (`messages_total`) to
+  only the *current* prefix's document count, while the processed count is
+  cumulative across all prefixes. On a multi-index-set export this displayed e.g.
+  `214,981,759 of 21,160,634 records` (processed far larger than the total) with
+  the bar pinned at 99%. Now the denominator accumulates a **grand total across
+  all prefixes**, so processed ≤ total holds for the whole run and the percentage
+  is the true overall fraction. **Display-only bug — no data was lost or skipped;
+  every index in every index set was always exported.** (Single-index-set exports
+  and API-mode export were unaffected.)
+
 ## [1.13.24] - 2026-07-23
 
 ### Changed
