@@ -13,6 +13,28 @@ OS=$(uname -srm)
 
 echo "Running tests for v${VERSION}..."
 
+# --- JS syntax gate ---------------------------------------------------------
+# The Python suite never loads the browser JS, so a syntax error there (e.g. an
+# apostrophe inside a single-quoted i18n string) shipped undetected and broke the
+# whole UI (fell back to English, settings page failed to render). Hard-fail the
+# release if any static JS file doesn't parse. Requires node.
+JS_ERR=""
+if command -v node >/dev/null 2>&1; then
+    for jsf in glogarch/web/static/js/*.js; do
+        if ! node --check "$jsf" 2>/tmp/jscheck.err; then
+            JS_ERR="${JS_ERR}\n$jsf:\n$(cat /tmp/jscheck.err)"
+        fi
+    done
+    if [ -n "$JS_ERR" ]; then
+        echo "❌ JS SYNTAX ERROR — refusing to release:"
+        printf "%b\n" "$JS_ERR"
+        exit 1
+    fi
+    echo "JS syntax check: OK ($(ls glogarch/web/static/js/*.js | wc -l) files)"
+else
+    echo "⚠ node not found — SKIPPING JS syntax check (install node to gate JS)."
+fi
+
 # Run pytest and capture output (NO_COLOR disables ANSI escape codes).
 # IMPORTANT: pytest's exit code is captured BEFORE the ANSI strip pipe.
 # Previous "pytest | sed" form put $? on sed (always 0) so failures were
