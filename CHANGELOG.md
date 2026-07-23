@@ -2,6 +2,21 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.13.22] - 2026-07-23
+
+### Fixed
+
+- **Critical: the whole UI fell back to English and Settings appeared blank
+  (regression since 1.13.20).** A stray apostrophe in a single-quoted i18n string
+  (`… the target's buffers …`) was a JavaScript **syntax error** that stopped
+  `i18n.js` from parsing — so translations never applied (the page kept its English
+  defaults) and JS-rendered pages like Settings failed to render. **No data was lost**
+  — `config.yaml` is never touched by this; fixing the string restores the language
+  and all settings.
+- **New release gate: static JavaScript is now syntax-checked (`node --check`) and a
+  broken `.js` HARD-FAILS the release.** The Python test suite never loaded the browser
+  JS, so this shipped undetected; it can't happen again.
+
 ## [1.13.21] - 2026-07-23
 
 ### Fixed

@@ -129,7 +129,7 @@ const I18N = {
         import_speed: 'Speed',
         import_batch_size: 'Batch Size',
         import_batch_short: 'Batch',
-        import_batch_size_hint: 'Messages per batch. Higher = faster; auto-throttled by the target's buffers, journal & JVM heap.',
+        import_batch_size_hint: "Messages per batch. Higher = faster; auto-throttled by the target's buffers, journal & JVM heap.",
         import_heap_label: 'Heap',
         import_buffer_label: 'Buffer',
         import_mem_label: 'Mem',

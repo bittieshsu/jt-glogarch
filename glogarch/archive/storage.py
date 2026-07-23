@@ -487,7 +487,8 @@ class ArchiveIterator:
             except Exception:
                 self.metadata = ArchiveMetadata()
 
-        decoder = json.JSONDecoder()
+        raw_decode = json.JSONDecoder().raw_decode
+        _SEP = " \t\r\n,"
         self._total = 0
         with gzip.open(self.path, "rt", encoding="utf-8") as f:
             # 1) Skip to the start of the messages array (the '[' after "messages").
@@ -505,34 +506,41 @@ class ArchiveIterator:
                         buf = buf[b + 1:]
                         started = True
 
-            # 2) Stream message objects; only `buf` (~read window) + one batch live.
+            # 2) Stream message objects. A `pos` cursor advances through `buf`;
+            #    we only slice/compact `buf` on a refill, NOT per message — so this
+            #    stays O(n) (a per-message `buf = buf[idx:]` would be O(n^2)).
             batch = []
-            while True:
+            pos = 0
+            done = False
+            while not done:
+                n = len(buf)
                 # Skip whitespace / element commas between objects.
-                i, n = 0, len(buf)
-                while i < n and buf[i] in " \t\r\n,":
-                    i += 1
-                if i:
-                    buf = buf[i:]
-                if buf[:1] == "]":
+                while pos < n and buf[pos] in _SEP:
+                    pos += 1
+                if pos < n and buf[pos] == "]":
                     break  # end of messages array
-                if not buf:
+                if pos >= n:
+                    # Consumed the buffer — compact + refill.
+                    buf = ""
+                    pos = 0
                     chunk = f.read(self._READ_CHUNK)
                     if not chunk:
                         break
-                    buf += chunk
+                    buf = chunk
                     continue
                 try:
-                    obj, idx = decoder.raw_decode(buf)
+                    obj, pos = raw_decode(buf, pos)
                 except json.JSONDecodeError:
-                    # Object straddles the buffer tail — read more and retry.
+                    # Object straddles the buffer tail — keep the tail, read more.
+                    buf = buf[pos:]
+                    pos = 0
                     chunk = f.read(self._READ_CHUNK)
                     if not chunk:
+                        done = True
                         break  # truncated file — stop gracefully
                     buf += chunk
                     continue
                 batch.append(obj)
-                buf = buf[idx:]
                 self._total += 1
                 if len(batch) >= self.batch_size:
                     yield batch

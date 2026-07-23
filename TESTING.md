@@ -4,6 +4,12 @@
 
 This checklist must pass before every release. Run `pytest` from the project root.
 
+> **JS syntax gate (mandatory):** the Python suite never loads the browser JS, so a
+> syntax error in `web/static/js/*.js` (e.g. an apostrophe inside a single-quoted
+> i18n string) ships undetected and breaks the whole UI (falls back to English,
+> Settings renders blank). `scripts/run-tests.sh` runs `node --check` on every JS
+> file and HARD-FAILS the release on error. Always `node --check` after editing JS.
+
 ```bash
 ./scripts/run-tests.sh
 ```
