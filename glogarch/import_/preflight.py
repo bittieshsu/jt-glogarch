@@ -273,6 +273,47 @@ class PreflightChecker:
             except Exception as e:
                 warnings.append(f"Could not query cluster health: {e}")
 
+            # 1b. Backpressure gate — refuse to import into a Graylog that already
+            # can't drain to OpenSearch (output/process ring buffers full). Pushing
+            # more in now would fill the journal, wedge Graylog, and stall the import.
+            try:
+                br = await c.post(
+                    f"{self.api_url}/api/system/metrics/multiple",
+                    json={"metrics": [
+                        "org.graylog2.buffers.output.usage", "org.graylog2.buffers.output.size",
+                        "org.graylog2.buffers.process.usage", "org.graylog2.buffers.process.size",
+                    ]},
+                )
+                if br.status_code == 200:
+                    bm = {}
+                    for it in (br.json() or {}).get("metrics", []):
+                        nm = it.get("full_name") or it.get("name")
+                        vv = (it.get("metric") or {}).get("value")
+                        if nm is not None and vv is not None:
+                            bm[nm] = vv
+
+                    def _bpct(u, s):
+                        uu, ss = bm.get(u), bm.get(s)
+                        return (uu / ss * 100) if (uu is not None and ss) else None
+                    out_pct = _bpct("org.graylog2.buffers.output.usage", "org.graylog2.buffers.output.size")
+                    proc_pct = _bpct("org.graylog2.buffers.process.usage", "org.graylog2.buffers.process.size")
+                    worst = max([p for p in (out_pct, proc_pct) if p is not None], default=None)
+                    if worst is not None and worst >= 90:
+                        errors.append(
+                            f"Target Graylog process/output buffer is {worst:.0f}% full — it "
+                            f"can't write to OpenSearch fast enough. Importing now would wedge "
+                            f"Graylog and the import would stall. Fix the OpenSearch write path "
+                            f"(cluster health / disk watermark) before importing."
+                        )
+                    elif worst is not None and worst >= 70:
+                        warnings.append(
+                            f"Target Graylog process/output buffer is {worst:.0f}% full — "
+                            f"Graylog is behind on indexing. The import will auto-throttle; "
+                            f"consider resolving OpenSearch capacity first."
+                        )
+            except Exception:
+                pass
+
             # 2. GELF input on the configured port: exists & RUNNING + matches us
             if self.gelf_port:
                 try:

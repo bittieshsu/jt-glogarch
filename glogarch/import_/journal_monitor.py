@@ -19,6 +19,8 @@ class JournalStatus:
     available: bool = True
     error: str = ""
     heap_percent: float | None = None  # target Graylog JVM heap used% (None if unknown)
+    buffer_output_pct: float | None = None   # output ring buffer used% (Graylog->OpenSearch)
+    buffer_process_pct: float | None = None  # process ring buffer used%
 
 
 class JournalMonitor:
@@ -35,11 +37,19 @@ class JournalMonitor:
     THRESHOLD_PAUSE = 500_000     # uncommitted > 500K -> pause 30s
     THRESHOLD_STOP = 1_000_000    # uncommitted > 1M -> stop import
 
-    # JVM heap tiers — protect the TARGET Graylog from OOM during a fast import
-    # (mirrors the export HealthGuard). A big GELF batch that outruns indexing
-    # piles onto heap; back off before the target wedges.
-    HEAP_SLOW = 80.0              # heap used% >= 80 -> slow down
-    HEAP_PAUSE = 92.0             # heap used% >= 92 -> pause
+    # JVM heap tiers — a HIGH safety net only. Graylog with G1GC normally idles at
+    # 80-95% heap (G1 doesn't return memory eagerly), so heap% is a noisy pressure
+    # signal — the ring buffers below are the reliable one. Only treat heap as
+    # pressure when it's genuinely near-OOM, so we don't throttle a healthy import.
+    HEAP_SLOW = 95.0             # heap used% >= 95 -> slow down
+    HEAP_PAUSE = 98.0            # heap used% >= 98 -> pause (near OOM)
+
+    # Ring-buffer tiers — the EARLIEST signal that Graylog can't drain to
+    # OpenSearch. The process/output ring buffers wedge (~65K of 65536) long
+    # before the journal shows a big backlog, so this catches a stall first and
+    # stops us from filling the journal / wedging Graylog at all.
+    BUFFER_SLOW = 70.0           # buffer used% >= 70 -> slow down
+    BUFFER_PAUSE = 90.0          # buffer used% >= 90 -> pause
 
     def __init__(
         self,
@@ -119,11 +129,17 @@ class JournalMonitor:
                 except Exception:
                     heap_pct = None
 
+                # Sample the process/output ring-buffer utilization — the earliest
+                # sign Graylog can't keep up with OpenSearch.
+                buf_out_pct, buf_proc_pct = await self._buffer_pcts(client, self.api_url, auth)
+
             return JournalStatus(
                 uncommitted=data.get("uncommitted_journal_entries", 0),
                 size_bytes=data.get("journal_size", 0),
                 available=True,
                 heap_percent=heap_pct,
+                buffer_output_pct=buf_out_pct,
+                buffer_process_pct=buf_proc_pct,
             )
         except Exception as e:
             log.warning("Journal API check failed", error=str(e))
@@ -228,6 +244,39 @@ class JournalMonitor:
             log.warning("Journal SSH check failed (subprocess)", error=str(e))
             return JournalStatus(available=False, error=str(e))
 
+    _BUFFER_METRICS = [
+        "org.graylog2.buffers.output.usage", "org.graylog2.buffers.output.size",
+        "org.graylog2.buffers.process.usage", "org.graylog2.buffers.process.size",
+    ]
+
+    @staticmethod
+    async def _buffer_pcts(client, api_url, auth):
+        """Best-effort (output%, process%) ring-buffer utilization from Graylog
+        metrics. Returns (None, None) on any failure."""
+        try:
+            r = await client.post(
+                f"{api_url}/api/system/metrics/multiple",
+                auth=auth,
+                headers={"Accept": "application/json", "X-Requested-By": "jt-glogarch"},
+                json={"metrics": JournalMonitor._BUFFER_METRICS},
+            )
+        except Exception:
+            return None, None
+        if r.status_code != 200:
+            return None, None
+        m = {}
+        for it in (r.json() or {}).get("metrics", []):
+            nm = it.get("full_name") or it.get("name")
+            vv = (it.get("metric") or {}).get("value")
+            if nm is not None and vv is not None:
+                m[nm] = vv
+
+        def _pct(use_key, size_key):
+            u, s = m.get(use_key), m.get(size_key)
+            return round(u / s * 100, 1) if (u is not None and s) else None
+        return (_pct("org.graylog2.buffers.output.usage", "org.graylog2.buffers.output.size"),
+                _pct("org.graylog2.buffers.process.usage", "org.graylog2.buffers.process.size"))
+
     _SEVERITY = {"normal": 0, "slow": 1, "pause": 2, "stop": 3}
 
     def recommend_action(self, status: JournalStatus) -> str:
@@ -282,4 +331,12 @@ class JournalMonitor:
             heap_action = "pause" if hp >= self.HEAP_PAUSE else ("slow" if hp >= self.HEAP_SLOW else "normal")
             if self._SEVERITY[heap_action] > self._SEVERITY[action]:
                 action = heap_action
+
+        # Ring-buffer tier — earliest stall signal (worst of output/process).
+        for bp in (status.buffer_output_pct, status.buffer_process_pct):
+            if bp is None:
+                continue
+            buf_action = "pause" if bp >= self.BUFFER_PAUSE else ("slow" if bp >= self.BUFFER_SLOW else "normal")
+            if self._SEVERITY[buf_action] > self._SEVERITY[action]:
+                action = buf_action
         return action

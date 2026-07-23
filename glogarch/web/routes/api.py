@@ -453,7 +453,13 @@ async def trigger_import(request: Request, background_tasks: BackgroundTasks):
             if fc.cancelled:
                 raise RuntimeError("Job cancelled by user")
             info["job_id"] = job_id
-            _job_progress.setdefault(job_id, []).append(info)
+            # Keep only the last ~100 progress events (like the export path) — a
+            # multi-million-record import fires per batch and this list would grow
+            # unbounded in memory otherwise.
+            events = _job_progress.setdefault(job_id, [])
+            if len(events) > 100:
+                events = _job_progress[job_id] = events[-50:]
+            events.append(info)
 
         try:
             asyncio.run(importer.import_archives(
@@ -529,6 +535,8 @@ async def get_import_status(request: Request, job_id: str):
         "auto_rate": fc.auto_rate,
         "journal_action": fc.journal_action,
         "heap_percent": js.heap_percent if js else None,
+        "buffer_output_pct": js.buffer_output_pct if js else None,
+        "buffer_process_pct": js.buffer_process_pct if js else None,
         "journal": {
             "uncommitted": js.uncommitted if js else None,
             "size_bytes": js.size_bytes if js else None,

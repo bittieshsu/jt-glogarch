@@ -1382,8 +1382,15 @@ function startImportStatusPoll(jobId) {
                 // Target Graylog JVM heap — the second signal the throttle watches.
                 const hp = st.heap_percent;
                 if (hp !== null && hp !== undefined) {
-                    const hc = hp >= 92 ? 'var(--danger)' : hp >= 80 ? 'var(--warning)' : 'var(--success)';
+                    const hc = hp >= 98 ? 'var(--danger)' : hp >= 95 ? 'var(--warning)' : 'var(--success)';
                     html += ` <span data-style="color:${hc}">· ${t('import_heap_label')}: ${hp}%</span>`;
+                }
+                // Output ring buffer — the EARLIEST sign Graylog can't drain to
+                // OpenSearch (this is what wedges Graylog first).
+                const bo = st.buffer_output_pct;
+                if (bo !== null && bo !== undefined) {
+                    const bc = bo >= 90 ? 'var(--danger)' : bo >= 70 ? 'var(--warning)' : 'var(--success)';
+                    html += ` <span data-style="color:${bc}">· ${t('import_buffer_label')}: ${bo}%</span>`;
                 }
                 badge.innerHTML = html;
             }
