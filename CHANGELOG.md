@@ -2,6 +2,20 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.13.38] - 2026-07-24
+
+### Fixed
+
+- **The capacity estimate over-counted indices for an empty restore target.** The
+  index-count is meant to use the MEASURED OpenSearch bytes/document, but that was
+  only read from the target index set's own indices — and a fresh restore target
+  has none ("currently has 0 indices"), so it fell back to the raw (uncompressed)
+  archive JSON size and inflated the index count (e.g. 3.4 TB JSON → 162 indices
+  when the real indexed size is much smaller). It now falls back to measuring
+  bytes/document from the **whole cluster's existing data**, so the estimate
+  reflects real OpenSearch on-disk size even when the target set is empty. (Raw
+  JSON is only used if the entire cluster has no data at all.)
+
 ## [1.13.37] - 2026-07-24
 
 ### Added
