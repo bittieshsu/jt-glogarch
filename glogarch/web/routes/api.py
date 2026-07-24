@@ -607,11 +607,12 @@ async def import_capacity_estimate(request: Request):
     # the ratio is data-dependent, so measure it from the customer's own data).
     prefix = iset.get("index_prefix", "") or ""
     bytes_per_doc = 0.0
-    if os_hosts and prefix:
+    measure_scope = ""
+    if os_hosts:
         bpd = await _measure_bytes_per_doc(os_hosts, os_cfg.username, os_cfg.password,
                                            os_cfg.verify_ssl, prefix)
         if bpd:
-            bytes_per_doc = bpd
+            bytes_per_doc, measure_scope = bpd
     indexed_bytes_est = int(total_messages * bytes_per_doc) if bytes_per_doc else 0
     json_to_index_ratio = (indexed_bytes_est / total_bytes) if (indexed_bytes_est and total_bytes) else None
     # For SizeBased rotation, recompute the index count from the ACTUAL indexed
@@ -648,31 +649,41 @@ async def import_capacity_estimate(request: Request):
         "disk_fits": (rec_max_indices >= estimated) if rec_max_indices else None,
         # measured JSON→index sizing
         "bytes_per_doc": round(bytes_per_doc, 1),
+        "measure_scope": measure_scope,
         "indexed_bytes_est": indexed_bytes_est,
         "json_to_index_ratio": round(json_to_index_ratio, 3) if json_to_index_ratio else None,
     }
 
 
 async def _measure_bytes_per_doc(hosts, user, pw, verify, prefix):
-    """Measure REAL indexed bytes-per-document from the target's existing indices
-    (primary store size ÷ doc count) — the accurate proxy for OpenSearch on-disk
-    size vs the raw archive JSON. Returns a float or None."""
+    """Measure REAL indexed bytes-per-document (primary store size ÷ doc count) —
+    the accurate proxy for OpenSearch on-disk size vs the raw archive JSON.
+
+    Prefers the TARGET index set's own indices (most representative). If that set
+    is empty (a fresh restore target — "currently has 0 indices"), falls back to
+    the WHOLE cluster's existing data so the estimate is still measured, not a raw
+    JSON guess. Returns (bytes_per_doc, scope) or None."""
     import httpx as _httpx
     auth = _httpx.BasicAuth(user, pw) if user else None
-    for h in (hosts or []):
-        try:
-            async with _httpx.AsyncClient(verify=verify, timeout=10.0) as c:
-                r = await c.get(f"{h.rstrip('/')}/{prefix}*/_stats/store,docs",
-                                auth=auth, headers={"Accept": "application/json"})
-                if r.status_code != 200:
-                    continue
-                pri = ((r.json().get("_all") or {}).get("primaries") or {})
-                store = int((pri.get("store") or {}).get("size_in_bytes") or 0)
-                docs = int((pri.get("docs") or {}).get("count") or 0)
-                if store > 0 and docs > 0:
-                    return store / docs
-        except Exception:
-            continue
+    targets = []
+    if prefix:
+        targets.append((f"/{prefix}*/_stats/store,docs", "index-set"))
+    targets.append(("/_stats/store,docs", "cluster"))   # fallback: all existing data
+    for path, scope in targets:
+        for h in (hosts or []):
+            try:
+                async with _httpx.AsyncClient(verify=verify, timeout=10.0) as c:
+                    r = await c.get(f"{h.rstrip('/')}{path}", auth=auth,
+                                    headers={"Accept": "application/json"})
+                    if r.status_code != 200:
+                        continue
+                    pri = ((r.json().get("_all") or {}).get("primaries") or {})
+                    store = int((pri.get("store") or {}).get("size_in_bytes") or 0)
+                    docs = int((pri.get("docs") or {}).get("count") or 0)
+                    if store > 0 and docs > 0:
+                        return store / docs, scope
+            except Exception:
+                continue
     return None
 
 
