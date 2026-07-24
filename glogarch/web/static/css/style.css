@@ -645,7 +645,26 @@
 
 /* Live import speed/batch controls — keep each label on one line */
 #import-gelf-controls .u080 { white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; }
-#import-gelf-controls #import-live-batch { width: auto; min-width: 64px; }
+/* The batch <select> is `no-custom` (updated programmatically by the status
+   poll), so it isn't skinned by the custom-select JS — style the native element
+   to match `.rate-num`/themed controls instead of showing a raw browser dropdown. */
+#import-gelf-controls #import-live-batch {
+    width: auto;
+    min-width: 64px;
+    padding: 2px 26px 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background-color: var(--input-bg);
+    color: var(--text);
+    font-size: 0.9em;
+    cursor: pointer;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path d='M1 1l4 4 4-4' fill='none' stroke='%23888' stroke-width='1.5'/></svg>");
+    background-repeat: no-repeat;
+    background-position: right 9px center;
+}
 
 /* Editable numeric entry for batch delay (keyboard-friendly, beside the slider) */
 .rate-num {

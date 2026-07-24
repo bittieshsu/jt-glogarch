@@ -2,6 +2,32 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.13.44] - 2026-07-24
+
+### Fixed
+
+- **Import/export progress bar no longer freezes while the job keeps running.**
+  The foreground progress used to update only from the live SSE stream; the 2s
+  polling fallback was gated behind `sseOk`, which latches true on the first
+  event and every heartbeat. So once the SSE stream stalled or dropped (common
+  behind a proxy on a long import, or during a backpressure pause), the top bar
+  froze at a stale count even though the job advanced server-side and the health
+  line kept updating — making it look like the import "only runs in the
+  background". The bar now always refreshes from the authoritative job record on
+  the 2s poll, via a shared monotonic renderer (never freezes, never goes
+  backward). To be clear: the job always runs server-side regardless of the
+  dialog — "Close (keep running)" only hides the view, it was never a gate.
+
+- **Live "Batch" dropdown in the import progress dialog is now themed.** It is a
+  `no-custom` native `<select>` (updated programmatically by the status poll) so
+  the custom-select skin skipped it and it rendered as a raw browser dropdown;
+  it now matches the bordered/rounded themed controls with a custom caret.
+
+### Changed
+
+- Import health-badge label reads "本機 jt-glogarch" (host prefix first), aligning
+  with the "目標 Graylog" label above it.
+
 ## [1.13.43] - 2026-07-24
 
 ### Added
