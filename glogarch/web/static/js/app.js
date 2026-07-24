@@ -2594,6 +2594,24 @@ function watchJob(jobId, type, onComplete) {
     if (bar) bar.style.width = '0%';
     if (text) text.textContent = '';
 
+    // Monotonic progress renderer shared by the SSE stream AND the 2s poll, so
+    // the bar keeps advancing from the poll even when the SSE stream stalls or
+    // drops (common behind a proxy on a long import). It must NEVER freeze while
+    // the job is still running server-side, and never move the count backwards.
+    let lastMsgs = -1;
+    function renderProgress(pct, msgs, total, index, detail, phase) {
+        const detailOnly = detail && (!msgs || phase === 'scanning' || phase === 'dedup' || phase === 'skipping');
+        if (!detailOnly && msgs != null) {
+            if (msgs < lastMsgs) return;   // older/stale reading — ignore
+            lastMsgs = msgs;
+        }
+        if (bar) bar.style.width = (pct || 0) + '%';
+        if (!text) return;
+        if (detailOnly) { text.textContent = detail; return; }
+        const idx = index ? ` ${index}` : '';
+        text.textContent = `${formatNumber(msgs || 0)}/${total ? formatNumber(total) : '?'}${idx} — ${(pct || 0).toFixed(1)}%`;
+    }
+
     function showResult(job) {
         const msgs = job.messages_done || 0;
         if (bar) bar.style.width = '100%';
@@ -2637,18 +2655,7 @@ function watchJob(jobId, type, onComplete) {
     es.addEventListener('progress', (e) => {
         sseOk = true;
         const data = JSON.parse(e.data);
-        if (bar) bar.style.width = (data.pct || 0) + '%';
-        if (text) {
-            // Show detail string for scanning/dedup/skipping phases (no records yet)
-            if (data.detail && (!data.messages_done || data.phase === 'scanning' || data.phase === 'dedup' || data.phase === 'skipping')) {
-                text.textContent = data.detail;
-            } else {
-                const msgs = formatNumber(data.messages_done || 0);
-                const total = data.messages_total ? formatNumber(data.messages_total) : '?';
-                const idx = data.index ? ` ${data.index}` : '';
-                text.textContent = `${msgs}/${total}${idx} — ${(data.pct || 0).toFixed(1)}%`;
-            }
-        }
+        renderProgress(data.pct, data.messages_done, data.messages_total, data.index, data.detail, data.phase);
     });
     // Heartbeat: the server sends these while a running import is paused on
     // backpressure (no message progress for minutes). Just keep the stream
@@ -2682,7 +2689,7 @@ function watchJob(jobId, type, onComplete) {
         cleanup();
         showResult(evt);
     });
-    es.onerror = () => { es.close(); };
+    es.onerror = () => { sseOk = false; try { es.close(); } catch (_) {} };
 
     // Clean up EventSource on page navigation/unload
     const _cleanupOnUnload = () => cleanup();
@@ -2708,15 +2715,12 @@ function watchJob(jobId, type, onComplete) {
                 cleanup();
                 window.removeEventListener('beforeunload', _cleanupOnUnload);
                 showResult(job);
-            } else if (!sseOk) {
-                if (bar) bar.style.width = (job.progress_pct || 0) + '%';
-                if (text) {
-                    if (job.current_detail && !job.messages_done) {
-                        text.textContent = job.current_detail;
-                    } else {
-                        text.textContent = `${formatNumber(job.messages_done || 0)}/${job.messages_total ? formatNumber(job.messages_total) : '?'} — ${(job.progress_pct || 0).toFixed(0)}%`;
-                    }
-                }
+            } else {
+                // Always refresh from the authoritative job record while running —
+                // NOT gated on sseOk, so a stalled or dropped SSE stream can never
+                // freeze the bar. renderProgress keeps it monotonic vs the SSE.
+                renderProgress(job.progress_pct, job.messages_done, job.messages_total,
+                               job.index, job.current_detail, job.phase);
             }
         } catch (e) {
             // Network error — stop after 30 attempts (1 min)

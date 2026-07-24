@@ -802,7 +802,7 @@ const I18N = {
         import_mem_label: '可用記憶體',
         import_owner_target: '目標 Graylog',
         import_owner_target_hint: '被匯入的那台 Graylog——它的磁碟 journal、JVM heap 與 output 緩衝。匯入會依這些自動節流。',
-        import_owner_host: 'jt-glogarch 本機',
+        import_owner_host: '本機 jt-glogarch',
         import_owner_host_hint: '執行 jt-glogarch 的這台機器——它的系統可用記憶體。常與 Graylog／OpenSearch 共用同一台 VM,可用記憶體偏低時匯入會暫停。',
         flush_target: '疏通目標 Graylog',
         flush_target_hint: '非破壞性操作：循環寫入索引並重建索引範圍，讓卡住的目標恢復消化。不會刪除任何訊息。',
