@@ -375,6 +375,10 @@
                 <div class="u068" id="import-modal-progress">
                     <div class="progress-bar"><div class="progress-fill" id="import-progress-bar"></div></div>
                     <div class="progress-text" id="import-progress-text"></div>
+                    <!-- Prominent "paused/waiting" banner: shown when the import
+                         is throttled to a stop by target backpressure or low host
+                         RAM, so a frozen progress bar reads as "waiting", not stuck. -->
+                    <div class="import-pause-banner" id="import-pause-banner" style="display:none"></div>
                     <div class="u070" id="import-controls">
                         <!-- GELF-only: pause + live rate slider. Hidden when
                              import mode is bulk (bulk has no inter-batch

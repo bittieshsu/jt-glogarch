@@ -2,6 +2,18 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.13.42] - 2026-07-24
+
+### Added
+
+- **Prominent "paused/waiting" banner during an import.** When the importer is
+  throttled to a stop by target backpressure (output buffer full / journal
+  backlog / JVM heap) or low host RAM, a frozen progress bar used to look
+  "stuck". The progress dialog now shows an amber banner naming the dominant
+  signal — e.g. "Paused: waiting on the target Graylog output buffer (97%) to
+  drain. Resumes automatically — you can Close (keep running)." A manual pause
+  says so too. Reassures the operator that a stalled bar is *waiting*, not dead.
+
 ## [1.13.41] - 2026-07-24
 
 ### Fixed

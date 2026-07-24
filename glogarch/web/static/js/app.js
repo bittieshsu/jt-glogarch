@@ -1629,11 +1629,46 @@ function startImportStatusPoll(jobId) {
                 }
                 badge.innerHTML = html;
             }
+            // Prominent "paused/waiting" banner so a frozen progress bar reads as
+            // "waiting for the target to drain", not "stuck". Auto-pause (target
+            // backpressure) names the dominant signal; a manual pause says so.
+            const pb = document.getElementById('import-pause-banner');
+            if (pb) {
+                const action = st.journal_action;
+                const autoPause = action === 'pause' || action === 'stop';
+                const manualPause = !!st.paused;
+                if (autoPause || manualPause) {
+                    let reason;
+                    if (autoPause) {
+                        const bo = st.buffer_output_pct, hp = st.heap_percent, mm = st.mem_available_mb;
+                        const u = st.journal ? st.journal.uncommitted : null;
+                        if (mm !== null && mm !== undefined && mm <= 700) {
+                            reason = t('import_pause_mem').replace('{v}', formatNumber(mm));
+                        } else if (bo !== null && bo !== undefined && bo >= 90) {
+                            reason = t('import_pause_buffer').replace('{v}', bo);
+                        } else if (hp !== null && hp !== undefined && hp >= 95) {
+                            reason = t('import_pause_heap').replace('{v}', hp);
+                        } else {
+                            reason = t('import_pause_journal').replace('{v}', (u !== null && u !== undefined) ? formatNumber(u) : '?');
+                        }
+                    } else {
+                        reason = t('import_pause_manual');
+                    }
+                    pb.innerHTML = t('import_paused_banner').replace('{reason}', reason);
+                    pb.style.display = 'block';
+                } else {
+                    pb.style.display = 'none';
+                    pb.innerHTML = '';
+                }
+            }
         } catch(e) {}
     }, 5000);
 }
 function stopImportStatusPoll() {
     if (_importStatusPoll) { clearInterval(_importStatusPoll); _importStatusPoll = null; }
+    // Clear the paused banner so a finished/closed import never leaves it behind.
+    const pb = document.getElementById('import-pause-banner');
+    if (pb) { pb.style.display = 'none'; pb.innerHTML = ''; }
 }
 
 // ---- Export ----
