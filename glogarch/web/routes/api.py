@@ -523,6 +523,77 @@ async def trigger_import(request: Request, background_tasks: BackgroundTasks):
     return {"job_id": job_id, "status": "started", "mode": import_mode}
 
 
+@router.post("/import/capacity-estimate")
+async def import_capacity_estimate(request: Request):
+    """Estimate — BEFORE the import starts — whether the target index set's
+    rotation + retention can hold this batch, so the operator can raise
+    max_number_of_indices first instead of discovering mid-import that retention
+    will delete the freshly-imported data."""
+    from glogarch.import_.preflight import PreflightChecker
+    from glogarch.utils.netguard import ssrf_block_reason
+    from glogarch.core.config_writer import reconcile_secret
+    from glogarch.utils.sanitize import sanitize
+
+    body = await request.json()
+    settings = _settings(request)
+    db = _db(request)
+    ids = body.get("archive_ids") or []
+    if not ids:
+        return JSONResponse({"error": "archive_ids required"}, status_code=400)
+
+    total_messages = 0
+    total_bytes = 0
+    for aid in ids:
+        rec = db.get_archive(aid)
+        if rec:
+            total_messages += rec.message_count or 0
+            # index size tracks the ORIGINAL (uncompressed) volume, not the gz file
+            total_bytes += (rec.original_size_bytes or rec.file_size_bytes or 0)
+
+    ic = settings.import_config
+    url = (body.get("target_api_url") or "").strip() or (ic.target_api_url or "")
+    if not url:
+        return JSONResponse({"error": "target_api_url required"}, status_code=400)
+    reason = ssrf_block_reason(url)
+    if reason:
+        return JSONResponse({"error": reason}, status_code=400)
+    token = reconcile_secret(body.get("target_api_token"), ic.target_api_token) or ""
+    user = (body.get("target_api_username") or "").strip() or (ic.target_api_username or "")
+    pw = reconcile_secret(body.get("target_api_password"), ic.target_api_password) or ""
+    if not token and not (user and pw):
+        return JSONResponse({"error": "Provide a token or username + password"}, status_code=400)
+
+    pf = PreflightChecker(api_url=url, api_token=token, api_username=user,
+                          api_password=pw, verify_ssl=False)
+    try:
+        idx_id, idx_title = await pf.find_target_index_set()
+        async with pf._client() as c:
+            r = await c.get(f"{pf.api_url}/api/system/indices/index_sets/{idx_id}")
+            iset = r.json() if r.status_code == 200 else {}
+        estimated, warnings = await pf.check_capacity(idx_id, total_messages, total_bytes)
+    except Exception as e:
+        return JSONResponse({"error": sanitize(str(e))}, status_code=500)
+
+    def _short(c: str) -> str:
+        return c.rsplit(".", 1)[-1].replace("Strategy", "").replace("Config", "") if c else "?"
+
+    ret = iset.get("retention_strategy", {}) or {}
+    ret_class = iset.get("retention_strategy_class", "") or ""
+    max_indices = int(ret.get("max_number_of_indices", 0)) if "Deletion" in ret_class else 0
+    insufficient = any("Retention will delete" in w for w in warnings)
+    return {
+        "total_messages": total_messages,
+        "total_bytes": total_bytes,
+        "index_set_title": idx_title,
+        "rotation": _short(iset.get("rotation_strategy_class", "")),
+        "retention": _short(ret_class),
+        "max_indices": max_indices,
+        "estimated_indices": estimated,
+        "sufficient": not insufficient,
+        "warnings": warnings,
+    }
+
+
 @router.post("/import/{job_id}/pause")
 async def pause_import(request: Request, job_id: str):
     """Pause a running import job."""
