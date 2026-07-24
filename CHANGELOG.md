@@ -2,6 +2,30 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.13.36] - 2026-07-24
+
+### Added
+
+- **Pre-import capacity estimate.** The import dialog now shows, before you start,
+  whether the target index set's rotation + retention can hold this batch:
+  "This import: N records / X GB → ~M index(es) · fits / MAY NOT FIT — raise
+  max_number_of_indices first". Auto-computed from the selected archives.
+- **Destination verification after import.** The completion now shows how many
+  messages the TARGET actually indexed (sent minus indexer failures), e.g.
+  "Completed (5,235,180 records) · indexed at target: 5,235,053" — so you can
+  confirm what really landed, not just what was sent.
+- **Record count shown next to the archive count.** "Import job started: … (50
+  archives)" now also shows the record total (e.g. "50 archives · 5,235,180
+  records") so the archive count isn't mistaken for the message count.
+
+### Fixed
+
+- **Guard against the "Select all = only this page" incomplete-import footgun.**
+  When you batch-import a selection while MORE archives match the current filter,
+  a dialog now forces an explicit choice — **Import ALL {total}** or **Import only
+  these {selected}** — so importing just one page of a multi-page range (e.g. one
+  day of a month) can never happen silently.
+
 ## [1.13.35] - 2026-07-24
 
 ### Added

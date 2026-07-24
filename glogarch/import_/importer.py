@@ -123,6 +123,7 @@ class ImportResult:
         self.job_id: str = ""
         self.duration_seconds: float = 0.0
         self.indexer_failure_fields: list[str] = []  # fields auto-diagnosed on failure
+        self.messages_indexed: int = 0  # destination-verified: sent - indexer failures
 
 
 class Importer:
@@ -643,6 +644,9 @@ class Importer:
                 try:
                     after = await self.preflight.get_indexer_failures_count()
                     delta = after - preflight_result.indexer_failures_baseline
+                    # Destination verification: how many of the sent messages the
+                    # TARGET actually indexed (sent minus what its indexer rejected).
+                    result.messages_indexed = max(0, result.messages_sent - max(0, delta))
                     if delta > 0:
                         # Don't just report a count and tell the operator to go
                         # read Graylog — auto-diagnose WHICH field(s) failed and
@@ -690,18 +694,32 @@ class Importer:
                         final_status = JobStatus.COMPLETED
                     else:
                         log.info(
-                            "Reconciliation OK: 0 indexer failures",
-                            sent=result.messages_sent,
+                            "Reconciliation OK: 0 indexer failures — all messages "
+                            "verified at destination",
+                            sent=result.messages_sent, indexed=result.messages_indexed,
                             failures_before=preflight_result.indexer_failures_baseline,
                             failures_after=after,
                         )
+                        result.notices.append(
+                            f"✓ Verified at target: {result.messages_indexed:,} of "
+                            f"{result.messages_sent:,} messages indexed (0 indexer failures)."
+                        )
                 except Exception as e:
                     log.warning("Post-import reconciliation failed", error=str(e))
+            else:
+                # No reconciliation available — treat sent as indexed (best effort).
+                result.messages_indexed = result.messages_sent
 
+            import json as _json_rj
             self.db.update_job(
                 job_id, status=final_status, progress_pct=100.0,
                 messages_done=result.messages_sent, completed_at=datetime.utcnow(),
                 error_message=recon_msg or None,
+                result_json=_json_rj.dumps({
+                    "messages_sent": result.messages_sent,
+                    "messages_indexed": result.messages_indexed,
+                    "indexer_failures": result.messages_sent - result.messages_indexed,
+                }),
             )
             log.info("Import completed", job_id=job_id,
                      archives=result.archives_processed, messages=result.messages_sent)

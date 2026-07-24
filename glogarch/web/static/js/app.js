@@ -726,26 +726,40 @@ async function batchImport() {
     const selAll = _selectAllPages;
     const ids = await getSelectedArchiveIds();
     if (ids.length === 0) return;
-    const openModal = () => {
-        // Open import modal for batch
+    const openModal = (finalIds) => {
         _importArchiveId = null;
         const modal = document.getElementById('import-modal');
         document.getElementById('modal-import-result').innerHTML = '';
         modal.style.display = 'flex';
-        // Override doImportSingle for batch
-        window._batchImportIds = ids;
+        window._batchImportIds = finalIds;
         applyI18n();
         _autofillImportModal();
         _applyImportDataNodeLock();
+        setTimeout(estimateImportCapacity, 400);
     };
-    // Surface the real count before importing a large / cross-page selection so
-    // "select all matching" can never silently queue thousands of archives.
+    // SAFETY NET for the recurring "全選 = only this page" incomplete-import
+    // footgun: the user selected a subset while MORE archives match the current
+    // filter. Force an explicit choice — import ALL matching (the usual intent)
+    // or only the selected page — so a partial restore can never happen silently.
+    if (!selAll && _archiveTotal > ids.length) {
+        showChoice(`${icon('warning')} ${t('sel_partial_title')}`,
+            t('sel_partial_msg').replace('{sel}', formatNumber(ids.length))
+                                .replace('{total}', formatNumber(_archiveTotal)),
+            [
+                {label: t('sel_import_all').replace('{n}', formatNumber(_archiveTotal)), cls: 'btn-primary',
+                 cb: async () => { await selectAllMatching(); openModal(_selectAllIds || ids); }},
+                {label: t('sel_import_these').replace('{n}', formatNumber(ids.length)), cls: 'btn-secondary',
+                 cb: () => openModal(ids)},
+            ]);
+        return;
+    }
+    // Cross-page / large selection: surface the real count first.
     if (selAll || ids.length > 100) {
         showConfirm(t('batch_import_confirm_title'),
             t('batch_import_confirm_msg').replace('{n}', formatNumber(ids.length)),
-            openModal);
+            () => openModal(ids));
     } else {
-        openModal();
+        openModal(ids);
     }
 }
 
@@ -792,6 +806,52 @@ async function _autofillImportModal() {
     setIf('modal-target-api-user', c.target_api_username);
     if (c.has_token) setIf('modal-target-api-token', c.target_api_token);
     if (c.has_password) setIf('modal-target-api-pass', c.target_api_password);
+}
+
+// Pre-import capacity estimate: does the target index set's rotation + retention
+// hold this batch? Auto-computed when the dialog opens (silent if creds/target
+// aren't ready yet). Warns BEFORE importing so the operator can raise
+// max_number_of_indices instead of retention silently deleting the new data.
+async function estimateImportCapacity() {
+    const el = document.getElementById('import-capacity-estimate');
+    if (!el) return;
+    const ids = window._batchImportIds || (_importArchiveId ? [_importArchiveId] : []);
+    const url = (document.getElementById('modal-target-api-url')?.value || '').trim();
+    if (!ids.length || !url) { el.innerHTML = ''; return; }
+    el.innerHTML = `<span class="u022">${t('cap_checking')}…</span>`;
+    let r;
+    try {
+        r = await fetchJSON(`${API}/import/capacity-estimate`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                archive_ids: ids,
+                target_api_url: url,
+                target_api_token: document.getElementById('modal-target-api-token')?.value || '',
+                target_api_username: document.getElementById('modal-target-api-user')?.value || '',
+                target_api_password: document.getElementById('modal-target-api-pass')?.value || '',
+            }),
+        });
+    } catch (e) { el.innerHTML = ''; return; }
+    if (!r || r.error) { el.innerHTML = ''; return; }   // silent — creds may not be ready
+    window._lastEstimate = {ids: ids.slice().sort().join(','), total_messages: r.total_messages};
+    const gb = (r.total_bytes / 1e9).toFixed(2);
+    const head = `${icon('db', 14)} ${t('cap_summary')
+        .replace('{m}', formatNumber(r.total_messages))
+        .replace('{gb}', gb)
+        .replace('{n}', formatNumber(r.estimated_indices))}`;
+    let verdict, cls;
+    if (r.max_indices > 0) {
+        verdict = (r.sufficient ? t('cap_ok') : t('cap_insufficient'))
+            .replace('{max}', formatNumber(r.max_indices))
+            .replace('{set}', esc(r.index_set_title || ''));
+        cls = r.sufficient ? 'status-completed' : 'status-failed';
+    } else {
+        verdict = t('cap_no_deletion');
+        cls = 'status-completed';
+    }
+    const warn = (!r.sufficient && (r.warnings || []).length)
+        ? `<div class="cap-warn u030">${esc(r.warnings[0])}</div>` : '';
+    el.innerHTML = `<div>${head} · <span class="${cls}">${verdict}</span></div>${warn}`;
 }
 
 async function batchDelete() {
@@ -1139,12 +1199,14 @@ let _importArchiveId = null;
 
 function importSingle(archiveId) {
     _importArchiveId = archiveId;
+    window._batchImportIds = null;
     const modal = document.getElementById('import-modal');
     document.getElementById('modal-import-result').innerHTML = '';
     modal.style.display = 'flex';
     applyI18n();
     _autofillImportModal();
     _applyImportDataNodeLock();
+    setTimeout(estimateImportCapacity, 400);
 }
 
 function closeImportModal() {
@@ -1357,7 +1419,11 @@ async function doImportSingle() {
         const liveRate = document.getElementById('import-live-rate');
         if (liveRate) { liveRate.value = rateMs; const rd = document.getElementById('import-live-rate-display'); if (rd) rd.value = rateMs; }
 
-        resultEl.innerHTML = `<span class="status-completed">${t('import_started')}${esc(result.job_id.substring(0,8))} (${ids.length} ${t('import_archives_unit')})</span>`;
+        // Show the record count alongside the archive count so "50 份歸檔" isn't
+        // mistaken for 50 records (from the pre-import capacity estimate).
+        const _recs = (window._lastEstimate && window._lastEstimate.ids === ids.slice().sort().join(',') && window._lastEstimate.total_messages)
+            ? ` · ${formatNumber(window._lastEstimate.total_messages)} ${t('unit_records')}` : '';
+        resultEl.innerHTML = `<span class="status-completed">${t('import_started')}${esc(result.job_id.substring(0,8))} (${ids.length} ${t('import_archives_unit')}${_recs})</span>`;
         watchJob(result.job_id, 'import', () => {
             if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
             _activeImportJobId = null;
@@ -2009,6 +2075,7 @@ async function retryImport(jobId) {
         setv('modal-target-api-url', rc.target_api_url);
         setv('modal-gelf-host', rc.gelf_host);
         if (rc.gelf_port) setv('modal-gelf-port', String(rc.gelf_port));
+        setTimeout(estimateImportCapacity, 400);
     });
 }
 
@@ -2411,7 +2478,14 @@ function watchJob(jobId, type, onComplete) {
             } else if (msgs === 0) {
                 text.innerHTML = `<span class="u030">${t('export_no_data')}</span>`;
             } else {
-                let html = `<span class="status-completed">${t('progress_completed')} (${formatNumber(msgs)} ${t('unit_records')})</span>`;
+                // Destination verification for imports: how many the TARGET
+                // actually indexed (sent minus indexer failures).
+                let verified = '';
+                if (job.job_type === 'import' && job.result && typeof job.result.messages_indexed === 'number') {
+                    const fails = job.result.indexer_failures || 0;
+                    verified = ` · <span class="${fails > 0 ? 'status-failed' : 'status-completed'}">${t('verify_indexed').replace('{n}', formatNumber(job.result.messages_indexed))}</span>`;
+                }
+                let html = `<span class="status-completed">${t('progress_completed')} (${formatNumber(msgs)} ${t('unit_records')})${verified}</span>`;
                 const cov = coverageChip(job);
                 if (cov) html += ` <span class="cov-chip-wrap">${cov}</span>`;
                 // Surface bulk-mode "where to find" notice (and any other
@@ -2848,6 +2922,38 @@ function closeConfirm() {
 function doConfirm() {
     if (_confirmCallback) _confirmCallback();
     closeConfirm();
+}
+
+// Multi-button choice dialog (e.g. "import all N" vs "import only these").
+let _choiceCallbacks = {};
+function showChoice(title, message, choices) {
+    let modal = document.getElementById('global-confirm-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'global-confirm-modal';
+        modal.className = 'confirm-modal-overlay';
+        modal.innerHTML = `<div class="confirm-modal-card">
+            <h3 id="confirm-title"></h3>
+            <p id="confirm-message"></p>
+            <div class="btn-row" id="confirm-buttons"></div>
+        </div>`;
+        document.body.appendChild(modal);
+    }
+    document.getElementById('confirm-title').innerHTML = title;
+    document.getElementById('confirm-message').innerHTML = message;
+    _choiceCallbacks = {};
+    document.getElementById('confirm-buttons').innerHTML = choices.map((c, i) => {
+        _choiceCallbacks[i] = c.cb;
+        return `<button class="${c.cls || 'btn-secondary'}" data-act="choicePick" data-arg="${i}">${esc(c.label)}</button>`;
+    }).join('');
+    modal.style.display = 'flex';
+}
+function choicePick(i) {
+    const cb = _choiceCallbacks[i];
+    const modal = document.getElementById('global-confirm-modal');
+    if (modal) modal.style.display = 'none';
+    _choiceCallbacks = {};
+    if (cb) cb();
 }
 
 // ---- Tooltip Init ----
