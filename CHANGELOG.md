@@ -2,6 +2,27 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.14.11] - 2026-09-13
+
+### Fixed
+
+- **An online upgrade could not get past a rewritten upstream history.** On
+  2026-09-13 the published history was force-pushed to strip session URLs from
+  old commit messages. Every existing install then held commits GitHub no
+  longer has, so `deploy/upgrade.sh`'s `git pull --ff-only` failed with "Not
+  possible to fast-forward" and the upgrade stopped — on every site, and
+  permanently, because the fix itself ships through that same pull. The
+  installed service kept running its old version throughout, so nothing broke
+  and no scheduled run was missed, but no site could move forward. `upgrade.sh`
+  now tells a rewritten upstream apart from a local-changes conflict: when the
+  clone is both ahead of and behind `origin`, it says so and resets the install
+  to the published history. Tracked local edits are still stashed first, and
+  user data (config.yaml, the database, certs, reports) is gitignored before
+  any of this, so nothing of the operator's is discarded. A pull failure that
+  is NOT a divergence still stops the upgrade as loudly as before.
+  `tests/test_upgrade_divergence.py` runs the recovery block extracted from the
+  shipped script against a genuinely diverged pair of repositories.
+
 ## [1.14.10] - 2026-09-12
 
 ### Fixed

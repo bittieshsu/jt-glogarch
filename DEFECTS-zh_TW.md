@@ -78,6 +78,7 @@
 |---|---|---|---|
 | 22 | 通知 webhook 網址未做 SSRF 檢查（v1.13.63） | 其他所有接受網址的端點都使用 `ssrf_block_reason()`，唯獨此處遺漏 | 儲存時對 `webhook_url`／`server_url` 套用該防護 |
 | 39 | 建立 API token 被稽核成 `user.modify`（v1.14.10） | 兩份清單回答兩個問題——寬鬆的「是否敏感」清單與由細到粗的「發生了什麼」白名單——卻由寬鬆那份命名操作，於是 `POST /api/users/X/tokens/Y` 停在 `PUT\|POST /api/users/`。另有七種操作同樣被誤標，兩種敏感操作則只示警而未留下紀錄 | 操作名稱改由細的清單決定；`test_audit_operation_labels.py` 針對每個巢狀 URI 釘住標籤，並為每條敏感樣式保留範例請求，只要有一條進不了資料庫就失敗 |
+| 40 | 對已發布歷史做強制推送，導致每個既有站台的線上升級都被擋住（v1.14.11） | `upgrade.sh` 使用 `git pull --ff-only`，無法跨越被改寫的歷史；而修正本身也要靠同一條 pull 才送得到 | 偵測「同時領先又落後」並把安裝重設到 `origin`；`test_upgrade_divergence.py` 會對一組分岔的儲存庫實際執行出貨用的復原區塊 |
 
 ## 讓上述缺陷得以存活的測試盲點
 

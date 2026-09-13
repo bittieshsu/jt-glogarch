@@ -1,4 +1,4 @@
-# jt-glogarch v1.14.10
+# jt-glogarch v1.14.11
 
 **語言**： [English](README.md) | **繁體中文**  
 **網站**： <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Graylog Open (6.x / 7.x) 的記錄歸檔與還原工具
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.14.10-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.14.11-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open 版本不支援 Enterprise 版的 Archive 功能。
@@ -1317,6 +1317,25 @@ sudo -u jt-glogarch glogarch import \
 預設值刻意維持 1095：調低它會讓所有未曾明確設定過的站台，保留期被無聲縮短，而下一次清理作業就會刪掉這些站台仍預期存在的資料。
 
 
+
+### 升級時出現「Not possible to fast-forward, aborting」
+
+已發布的歷史在 2026-09-13 被改寫過（把舊 commit 訊息裡的 session 連結清掉），因此在那
+之前 clone 的安裝，手上握有 GitHub 已經沒有的 commit。`git pull --ff-only` 無法跨越這種
+情況，升級會在還沒動到任何東西之前停下來；執行中的服務不受影響，排程歸檔照常進行。
+
+v1.14.11 之後會自動復原。若要從更舊的版本升上來，可以改用離線更新包（完全不經過 git），
+或是把 clone 指回已發布的歷史一次：
+
+```bash
+cd /opt/jt-glogarch
+sudo git fetch origin
+sudo git reset --hard origin/main
+sudo bash deploy/upgrade.sh
+```
+
+`config.yaml`、資料庫、`certs/`、`reports/` 都已被 gitignore，重設不會動到它們。若你曾
+修改過被追蹤的檔案，請先自行保存（升級指令碼 stash 起來的內容可用 `git stash list` 查看）。
 
 ### OS 升級後服務起不來 — `ModuleNotFoundError: No module named 'glogarch'`
 

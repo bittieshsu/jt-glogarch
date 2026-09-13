@@ -187,6 +187,11 @@ GL_PASS='<graylog-admin-密碼>' bash scripts/e2e-archive-test.sh
 - [ ] 複製 `github/` 到暫存目錄 → `pip install` 成功
 - [ ] `deploy/install.sh` 路徑正確、systemd 預設 = Yes
 - [ ] `deploy/upgrade.sh` 可正常執行（db-backup → git pull → install → restart → verify）
+- [ ] **上游歷史被改寫時不能擋住升級** —— 已發布的歷史一旦被強制推送，既有的 clone
+      都會與遠端分岔，`git pull --ff-only` 必定失敗。`upgrade.sh` 要能判斷「同時領先又
+      落後」並說明原因，把安裝重設到 `origin`；若失敗原因不是歷史分岔，仍必須明確中止
+      升級（`tests/test_upgrade_divergence.py` 會把出貨指令碼裡的復原區塊，對一組真正
+      分岔的儲存庫實際執行）
 - [ ] **DB 備份確實產出檔案** —— 升級後 `/var/backups/jt-glogarch/` 會多一個新的
       `jt-glogarch-*.db` 快照。偵測指令曾在 root 的工作目錄下執行、對 `./config.yaml`
       拋 `PermissionError`，於是**無聲略過備份**卻印出看似正常的「not available」

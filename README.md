@@ -1,4 +1,4 @@
-# jt-glogarch v1.14.10
+# jt-glogarch v1.14.11
 
 **Language**: **English** | [繁體中文](README-zh_TW.md)  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Archive & restore logs for Graylog Open (6.x / 7.x)
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.14.10-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.14.11-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open does not include the Archive feature available in the Enterprise edition.
@@ -1455,6 +1455,29 @@ silent:
 The default is deliberately left at 1095: lowering it would silently shorten
 retention for every site that never set it explicitly, and the next cleanup run
 would delete data those sites still expect to have.
+
+### Upgrade stops with "Not possible to fast-forward, aborting"
+
+The published history was rewritten on 2026-09-13 (session URLs were stripped
+from old commit messages), so an install cloned before that date holds commits
+GitHub no longer has. `git pull --ff-only` cannot cross that, and the upgrade
+stops before changing anything — the running service is untouched and keeps
+archiving on schedule.
+
+v1.14.11 and later recover automatically. To get there from an older install,
+either use the offline bundle (it does not use git at all), or point the clone
+at the published history once:
+
+```bash
+cd /opt/jt-glogarch
+sudo git fetch origin
+sudo git reset --hard origin/main
+sudo bash deploy/upgrade.sh
+```
+
+`config.yaml`, the database, `certs/` and `reports/` are git-ignored, so the
+reset does not touch them. If you had edited tracked files, save them first
+(`git stash list` holds anything the upgrade script stashed).
 
 ### Service won't start after an OS upgrade — `ModuleNotFoundError: No module named 'glogarch'`
 

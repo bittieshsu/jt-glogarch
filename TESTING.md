@@ -233,6 +233,13 @@ GL_PASS='<graylog-admin-pw>' bash scripts/e2e-archive-test.sh
 - [ ] `deploy/install.sh` references correct paths, systemd default = Yes
 - [ ] `deploy/install.sh` writes a minimal `config.yaml` with `servers: []` (triggers setup wizard)
 - [ ] `deploy/upgrade.sh` runs successfully (db-backup → git pull → install → restart → verify)
+- [ ] **A rewritten upstream history does not block the upgrade** — if the
+      published history is ever force-pushed, every existing clone diverges and
+      `git pull --ff-only` fails. `upgrade.sh` must detect ahead-AND-behind and
+      reset the install to `origin`, saying so; a pull failure that is not a
+      divergence must still stop the upgrade
+      (`tests/test_upgrade_divergence.py` runs the shipped recovery block
+      against a genuinely diverged pair of repositories)
 - [ ] **The DB backup actually produced a file** — `/var/backups/jt-glogarch/` gains a
       fresh `jt-glogarch-*.db` snapshot. The presence probe once ran from root's cwd,
       hit `PermissionError` on `./config.yaml`, and SILENTLY skipped the backup while

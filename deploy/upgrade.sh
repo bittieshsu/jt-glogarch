@@ -148,9 +148,35 @@ else
     echo "  Local changes detected — stashing before pull..."
     git stash push -u -m "jt-glogarch upgrade auto-stash" >/dev/null 2>&1 || true
     if ! _git_pull; then
-        echo "  ⚠ ERROR: 'git pull' failed even after stashing local changes."
-        echo "     Resolve manually (e.g. 'git status' in $INSTALL_DIR) and re-run."
-        exit 1
+        # A fast-forward is also impossible when UPSTREAM history was rewritten
+        # (e.g. a force-push that removed something from old commit messages).
+        # Every existing clone then has commits origin no longer contains, and
+        # no amount of stashing helps: the upgrade would be blocked forever on
+        # every installed site. This deployment tree is a mirror of origin — it
+        # is not where anyone develops — so the recovery is to take origin's
+        # history verbatim. Tracked local edits are already in the stash above,
+        # and user data (config.yaml / *.db / certs/ / reports/) was gitignored
+        # before it, so nothing of the operator's is discarded here.
+        # >>> divergence-recovery (exercised verbatim by tests/test_upgrade_divergence.py)
+        _upstream="$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo origin/main)"
+        timeout 180 git $GIT_TLS_OPTS fetch origin >/dev/null 2>&1 || true
+        _ahead="$(git rev-list --count "$_upstream..HEAD" 2>/dev/null || echo 0)"
+        _behind="$(git rev-list --count "HEAD..$_upstream" 2>/dev/null || echo 0)"
+        _recovered=""
+        if [ "$_ahead" -gt 0 ] && [ "$_behind" -gt 0 ]; then
+            echo "  Upstream history was rewritten ($_ahead local commit(s) are no longer"
+            echo "  on $_upstream). Resetting this install to $_upstream..."
+            if git reset --hard "$_upstream"; then
+                echo "  Reset to $_upstream ($(git rev-parse --short HEAD))."
+                _recovered=1
+            fi
+        fi
+        # <<< divergence-recovery
+        if [ -z "$_recovered" ]; then
+            echo "  ⚠ ERROR: 'git pull' failed even after stashing local changes."
+            echo "     Resolve manually (e.g. 'git status' in $INSTALL_DIR) and re-run."
+            exit 1
+        fi
     fi
     echo "  (local changes saved in 'git stash' — run 'git stash list' to review)"
 fi
