@@ -116,6 +116,10 @@ sudo bash upgrade-offline.sh                # pip never touches the network; DB 
       <dd><code class="kbd">journalctl -u jt-glogarch -f</code></dd>
       <dt>Upgrade</dt>
       <dd><code class="kbd">sudo bash /opt/jt-glogarch/deploy/upgrade.sh</code> <span class="muted">(safe, takes a DB snapshot first)</span></dd>
+      <dt>Upgrade blocked</dt>
+      <dd><span>If it stops with <em>Not possible to fast-forward</em>, the published history was rewritten on 2026-09-13 and installs cloned before that date have diverged. Nothing is changed and the service keeps running. Point the clone at the published history once, then upgrade:</span>
+        <code class="kbd">cd /opt/jt-glogarch &amp;&amp; sudo git fetch origin &amp;&amp; sudo git reset --hard origin/main</code>
+        <span class="muted">(config.yaml, the database, certs/ and reports/ are git-ignored and untouched. v1.14.11 and later recover on their own.)</span></dd>
       <dt>Air-gapped upgrade</dt>
       <dd><span class="muted">no-internet hosts — see the "Air-gapped" tab above (build on a connected box &rarr; carry in &rarr; install)</span></dd>
       <dt>Uninstall</dt>

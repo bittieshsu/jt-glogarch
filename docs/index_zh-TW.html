@@ -119,6 +119,10 @@ sudo bash upgrade-offline.sh                # pip 全程不連網；會先自動
       <dd><code class="kbd">journalctl -u jt-glogarch -f</code></dd>
       <dt>升級</dt>
       <dd><code class="kbd">sudo bash /opt/jt-glogarch/deploy/upgrade.sh</code> <span class="muted">（會先快照備份 DB，不會破壞資料）</span></dd>
+      <dt>升級停住</dt>
+      <dd><span>若停在 <em>Not possible to fast-forward</em>，表示已發布的歷史在 2026-09-13 改寫過，在那之前 clone 的安裝會與遠端分岔。此時不會動到任何東西，服務照常執行。把 clone 指回已發布的歷史一次，再升級即可：</span>
+        <code class="kbd">cd /opt/jt-glogarch &amp;&amp; sudo git fetch origin &amp;&amp; sudo git reset --hard origin/main</code>
+        <span class="muted">（config.yaml、資料庫、certs/、reports/ 都已被 gitignore，不受影響。v1.14.11 之後會自動復原。）</span></dd>
       <dt>離線升級</dt>
       <dd><span class="muted">無外網主機——見上方「離線升級」分頁（可上網機器打包 → USB 帶入 → 主機安裝）</span></dd>
       <dt>移除</dt>
