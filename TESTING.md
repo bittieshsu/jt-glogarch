@@ -698,6 +698,36 @@ failure.
       cover's period line shows that week, then confirm the report's settings
       page still shows the original range.
 
+### Japanese UI + notifications (v1.15.0)
+
+- [ ] **Japanese translation is complete and intact** (`tests/test_i18n_ja.py`):
+      same keys as English, every `{placeholder}` and HTML tag kept, no
+      Traditional-Chinese-only glyphs, no half-width `,;!?` against Japanese,
+      every page's `#lang-select` offers every language defined in `i18n.js`,
+      cron labels verified by executing `cronHuman()`.
+- [ ] **zh-TW rules stay scoped to the zh-TW block** (`test_static_sweeps.py`
+      `_i18n_spans`): adding a language after zh-TW must not feed it to the
+      Taiwan-terminology / full-width checks.
+- [ ] **Switching really renders Japanese** (`ui-smoke.py`, `ui-sim-test.py`):
+      kana on the login page and in the sidebar; zh-TW / ja / en cycle on every
+      page with no console errors.
+- [ ] **Japanese notifications** (`tests/test_notify_ja.py`): template keys and
+      placeholders match English; a real import-complete notification renders
+      in Japanese. Manually: set 通知語言 to 日本語 and send a test notification.
+- [ ] Manually: open setup wizard, login and Settings in Japanese on staging —
+      no English left in the chrome, nothing overflows the sidebar.
+- [ ] **Japanese PDF reports** (`tests/test_report_ja.py`): every report string
+      table has Japanese for every English key; the helpers (time spans, row
+      counts, incomplete warning, interval-coarsening note) really return
+      Japanese; **any function in `glogarch/report/` that branches on
+      `== "zh-TW"` must also handle `"ja"`** (the gate that stops a new string
+      from silently falling back to English); a Japanese report is set in a JP
+      font face; the report form offers 日本語 and a new report follows the UI
+      language.
+- [ ] Manually: generate a Japanese report (archive summary + one rebuilt
+      dashboard) on log4, render pages to PNG and read cover, TOC, table notes,
+      header/footer and watermark — no Chinese fallback, no tofu.
+
 ### Test Results
 
 - [ ] `./scripts/run-tests.sh` passes — `TEST-RESULTS.md` generated

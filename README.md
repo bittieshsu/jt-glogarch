@@ -1,12 +1,12 @@
-# jt-glogarch v1.14.11
+# jt-glogarch v1.15.0
 
-**Language**: **English** | [繁體中文](README-zh_TW.md)  
+**Language**: **English** | [繁體中文](README-zh_TW.md) | [日本語](README-ja.md)  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
 
 **Graylog Open Archive** — Archive & restore logs for Graylog Open (6.x / 7.x)
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.14.11-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.15.0-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open does not include the Archive feature available in the Enterprise edition.
@@ -174,7 +174,7 @@ GELF mode also has:
 - **System Logs** — Real-time log viewer + audit log
 - **Operation Audit** — Track who did what on Graylog (60+ operation types, filterable, sensitive operation alerts)
 - **Reports (beta)** — Generate branded PDF reports from Graylog dashboards and archive statistics; "Generate" can take a one-off From/To for that run only, without changing the report (gradient cover, table of contents, KPI summary, header/footer/page numbers, CJK fonts). Scheduling + email delivery. Needs the optional render engine (headless Chromium): run `sudo bash scripts/install-report-engine.sh` to enable.
-- Dark/Light theme, English/Traditional Chinese
+- Dark/Light theme, English/Traditional Chinese/Japanese
 - Collapsible sidebar, HTTPS, session authentication
 
 
@@ -183,7 +183,7 @@ GELF mode also has:
 Telegram • Discord • Slack • Microsoft Teams • Nextcloud Talk • Email (SMTP)
 
 Triggers: export complete, import complete, cleanup complete, errors, verification failed, sensitive operations, audit alerts.
-Bilingual messages (English / Traditional Chinese).
+Messages in English / Traditional Chinese / Japanese.
 
 
 ### Scheduling (APScheduler)
@@ -995,7 +995,7 @@ For export jobs, the inline progress is shown directly on the schedule row.
 
 Configure where notifications are sent.
 
-**Notification Language** — Choose between English and 繁體中文. This applies to
+**Notification Language** — Choose English, 繁體中文 or 日本語. This applies to
 **all** notification messages (test notification, export complete, errors, etc.).
 
 **Trigger Events** — Check which events should send notifications:

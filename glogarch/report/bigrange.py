@@ -83,12 +83,13 @@ def _nice_interval_at_least(seconds: float) -> int:
 
 
 def _fmt_interval(seconds: int, lang: str = "en") -> str:
-    zh = lang == "zh-TW"
+    words = {"zh-TW": dict(d='天', h='小時', m='分鐘', s='秒'),
+             "ja": dict(d='日', h='時間', m='分', s='秒')}.get(lang)
     for unit, div in (("d", 86400), ("h", 3600), ("m", 60), ("s", 1)):
         if seconds % div == 0 and seconds >= div:
             n = seconds // div
-            if zh:
-                return f"{n}{dict(d='天', h='小時', m='分鐘', s='秒')[unit]}"
+            if words:
+                return f"{n}{words[unit]}"
             return f"{n}{unit}"
     return f"{seconds}s"
 
@@ -140,6 +141,9 @@ def coarsen_intervals(search_def: dict, window_seconds: int,
                 if lang == "zh-TW":
                     notes[st["id"]] = (f"時間間隔已由 {_fmt_interval(old_s, lang)} 調整為 "
                                        f"{_fmt_interval(new_s, lang)}（範圍過大）")
+                elif lang == "ja":
+                    notes[st["id"]] = (f"時間間隔を {_fmt_interval(old_s, lang)} から "
+                                       f"{_fmt_interval(new_s, lang)} に調整しました（期間が広すぎるため）")
                 else:
                     notes[st["id"]] = (f"interval adjusted {_fmt_interval(old_s)} -> "
                                        f"{_fmt_interval(new_s)} (wide range)")

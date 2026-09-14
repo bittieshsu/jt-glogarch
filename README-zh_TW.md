@@ -1,12 +1,12 @@
-# jt-glogarch v1.14.11
+# jt-glogarch v1.15.0
 
-**語言**： [English](README.md) | **繁體中文**  
+**語言**： [English](README.md) | **繁體中文** | [日本語](README-ja.md)  
 **網站**： <https://jasoncheng7115.github.io/jt-glogarch/>
 
 **Graylog Open Archive** — Graylog Open (6.x / 7.x) 的記錄歸檔與還原工具
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.14.11-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.15.0-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open 版本不支援 Enterprise 版的 Archive 功能。
@@ -169,7 +169,7 @@ GELF 模式還有：
 - **系統記錄** — 即時記錄檢視器 + 稽核記錄
 - **行為稽核** — 追蹤 Graylog 上的所有操作（誰在什麼時候做了什麼），支援篩選、敏感操作通知（60+ 種操作類型）
 - **報表（Beta）** — 從 Graylog 儀表板與封存統計產生品牌化 PDF 報表；手動「產製」可指定只用於該次的起迄時間，不改動報表設定（漸層封面、目錄、KPI 摘要、頁首/頁尾/頁碼、繁中字型）。支援排程與 Email 寄送。需選用的渲染引擎（無頭 Chromium）：執行 `sudo bash scripts/install-report-engine.sh` 啟用。
-- 深色/淺色主題、English/繁體中文 雙語
+- 深色/淺色主題、English／繁體中文／日本語 三種介面語言
 - 可收摺側邊欄、HTTPS、Session 認證
 
 
@@ -178,7 +178,7 @@ GELF 模式還有：
 Telegram • Discord • Slack • Microsoft Teams • Nextcloud Talk • Email (SMTP)
 
 觸發事件：匯出完成、匯入完成、清理完成、錯誤、驗證失敗、敏感操作、稽核警報。
-雙語訊息（English / 繁體中文）。
+訊息語言（English／繁體中文／日本語）。
 
 
 ### 排程作業 (APScheduler)
@@ -944,7 +944,7 @@ OpenSearch 模式可選擇**保留最近 N 份 index**。下方的「可用 indi
 
 設定通知要送到哪裡。
 
-**通知語言** — 可選 English 或繁體中文。會套用到**所有**通知訊息（測試通知、匯出完成、錯誤等）。
+**通知語言** — 可選 English、繁體中文或日本語。會套用到**所有**通知訊息（測試通知、匯出完成、錯誤等）。
 
 **觸發事件** — 勾選哪些事件要發送通知：
 - 匯出完成

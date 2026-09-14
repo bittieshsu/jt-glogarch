@@ -9,7 +9,7 @@ Where this sits: `node --check` catches syntax, `js-undefined-check` catches
 missing names, `ui-smoke` catches login/i18n breakage — this walks what a USER
 does: every page, the import dialog end to end (autofill, custom-dropdown
 painting, clear-section auto-load), settings (derived API URL, never
-overwriting typed values), and the zh-TW/en switch on every page. It asserts
+overwriting typed values), and the zh-TW/ja/en switch on every page. It asserts
 the layer the user SEES — three shipped bugs each passed a check one layer
 below (class vs route, <option> vs painted skin, syntax vs runtime).
 
@@ -64,7 +64,7 @@ async def main():
             await pg.goto(f"{BASE}{path}", wait_until="networkidle")
             await pg.wait_for_timeout(1200)
             body = (await pg.evaluate("document.body.innerText")) or ""
-            for lang in ("zh-TW", "en"):
+            for lang in ("zh-TW", "ja", "en"):
                 await pg.evaluate(f"setLang('{lang}')")
                 await pg.wait_for_timeout(250)
             check(f"page {path}", len(errs) == n0 and len(body.strip()) > 50,
@@ -361,6 +361,26 @@ async def main():
         check("Cancel closes the one-off range dialog", closed)
         check("no JS errors during report dialog flow", len(errs) == n1,
               "; ".join(errs[n1:])[:200])
+
+        # 6) report form in Japanese: the language picker offers 日本語, a NEW
+        # report starts in the UI language, and the title placeholder is no
+        # longer hard-coded Chinese.
+        n2 = len(errs)
+        await pg.evaluate("setLang('ja')")
+        await pg.evaluate("openReportModal()")
+        await pg.wait_for_timeout(600)
+        form = await pg.evaluate(
+            "() => { const s=document.getElementById('rp-lang');"
+            "  const ti=document.getElementById('rp-title');"
+            "  return {opts: s ? [...s.options].map(o=>o.value) : [], value: s ? s.value : null,"
+            "          ph: ti ? ti.placeholder : null}; }")
+        check("report form offers 日本語 and a new report follows the UI language",
+              "ja" in form["opts"] and form["value"] == "ja", str(form))
+        check("report title placeholder follows the UI language",
+              form["ph"] == "セキュリティ週報", str(form.get("ph")))
+        check("no JS errors while opening the report form in Japanese", len(errs) == n2,
+              "; ".join(errs[n2:])[:200])
+        await pg.evaluate("setLang('en')")
 
         check("no JS errors during record-search flow", len(errs) == n0,
               "; ".join(errs[n0:][:2]))

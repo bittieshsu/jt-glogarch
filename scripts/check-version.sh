@@ -42,7 +42,7 @@ fi
 
 # README files SHOULD contain the version (title + badge) — assert they match.
 README_FAIL=0
-for readme in github/README.md github/README-zh_TW.md; do
+for readme in github/README.md github/README-zh_TW.md github/README-ja.md; do
     if ! grep -q "^# jt-glogarch v${VER//./\\.}" "$readme"; then
         echo "FAIL: $readme title is not '# jt-glogarch v${VER}'"
         README_FAIL=1

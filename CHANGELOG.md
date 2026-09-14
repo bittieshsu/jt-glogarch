@@ -2,6 +2,87 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.15.0] - 2026-09-14
+
+### Added
+
+- **Japanese (日本語) Web UI.** Every page, the login page and the setup wizard
+  are available in Japanese, selectable from the language switcher on all three
+  (English and 繁體中文 unchanged). The page's `lang` attribute follows the
+  choice, and schedule labels read as Japanese (`毎週土曜 03:00`, POSIX
+  day-of-week as before).
+- **Japanese notifications.** `notify.language: "ja"` (Notify page → Notification
+  Language → 日本語) sends export/import/cleanup/verify/error/audit notifications
+  and the test notification in Japanese on all six channels.
+- **`README-ja.md`** — a Japanese guide written for operating the product, not
+  just describing it: search inside archives first, a support matrix that
+  spells out what a Graylog 7 Data Node cannot do (OpenSearch Direct export,
+  Bulk import), install / air-gapped install / upgrade, what to do when an
+  archive run fails, restore procedure and restore drills, and the exact limits
+  of tamper evidence and operation audit (tamper-*evident*, not immutable
+  storage; requests that bypass the nginx proxy are not audited).
+- **Japanese product page** (`docs/index_ja.html`) with its own Japanese
+  screenshots (`docs/screenshots/*_ja.png`), captured from the same instance
+  and framing as the English and 繁體中文 sets.
+- **Japanese PDF reports.** A report's language can be 日本語: cover, table of
+  contents, table row counts, time-range captions, the "this report is
+  incomplete" warning, wide-window notes, the archive summary, the delivery
+  email and the default watermark (社外秘) are Japanese. Japanese reports are
+  set in a Japanese font face (Noto Sans CJK JP, then IPA Gothic) — in the page
+  body and in the header/footer bands and watermark — so shared kanji take their
+  Japanese shapes. Widget titles and field names still come from Graylog as
+  configured.
+
+### Changed
+
+- The language picker on the login page and the setup wizard said "EN / 中文",
+  which does not say which Chinese. All three pages now list English /
+  繁體中文 / 日本語, and a test keeps them identical.
+- A bar chart capped at 15 bars said so in one bilingual string
+  ("僅顯示前 15 名… / top 15 of N") whatever the report language, so English
+  reports carried Chinese. The note now follows the report language.
+- A NEW report's language defaults to the language the operator is using in the
+  UI; existing reports keep the language they saved. The report form's title and
+  header placeholders were hard-coded Chinese and are now translated.
+
+### Fixed
+
+- **The archive-summary report showed "0 archives"** beside the real record
+  count, in every language. `get_archive_stats()` names the count `total`; the
+  report read `total_archives`, which does not exist.
+- **A table-of-contents entry could point at the wrong page.** The page number
+  was the first page after the TOC whose text *contained* the section title,
+  and the summary sentence ("…jobs and operation audit…") contains the
+  Operation Audit title — so that entry, and its clickable link and PDF
+  bookmark, pointed at the summary page. A page where the title is a line of its
+  own now wins; a plain text match is only the fallback for a wrapped heading.
+  Both were found while checking a rendered Japanese report.
+
+### Not yet in Japanese
+
+- Two operation-audit alert body lines that were already English in every
+  language (the syslog heartbeat detail and the "+N more" line).
+
+### Upgrade
+
+- Nothing to do and nothing changes by itself: no config or database change, no
+  default changed. The UI language is still a per-browser choice and the
+  notification language stays whatever was configured.
+
+### Tests
+
+- `tests/test_i18n_ja.py`: Japanese has exactly the English keys, keeps every
+  `{placeholder}` and HTML tag, contains no Traditional-Chinese-only glyphs or
+  half-width punctuation against Japanese text, every page's switcher offers
+  every defined language, and the cron labels are checked by running the real
+  `cronHuman()`. `tests/test_notify_ja.py` does the same for notification
+  templates and renders a real import-complete notification in Japanese.
+- The zh-TW i18n sweeps sliced `i18n.js` from `'zh-TW'` to end-of-file; with a
+  block after it they would have applied Taiwan terminology and punctuation
+  rules to Japanese. Each rule now reads only its own language block.
+- `ui-smoke.py` switches to Japanese and requires kana on the login page and in
+  the sidebar; `ui-sim-test.py` cycles zh-TW / ja / en on every page.
+
 ## [1.14.11] - 2026-09-13
 
 ### Fixed

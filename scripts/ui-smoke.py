@@ -9,7 +9,8 @@ instance and hard-fails on:
 
   * any uncaught JS console error / pageerror (catches i18n.js parse failures)
   * i18n not wired (`typeof t !== 'function'`)
-  * language switch to zh-TW not applying (nav item never becomes Chinese)
+  * language switch to zh-TW / ja not applying (nav never becomes Chinese /
+    Japanese kana)
   * (with creds) the Settings page failing to render its servers
 
 Pre-auth checks need NO credentials — the login page loads i18n.js too, so a
@@ -69,6 +70,16 @@ async def run(base_url: str, user: str | None, password: str | None) -> int:
                 problems.append("login page: zh-TW switch produced no Chinese text")
         except Exception as e:
             problems.append(f"login page: setLang('zh-TW') threw: {e}")
+        # Japanese: kana is the signal — kanji alone would also match zh-TW
+        try:
+            await page.evaluate("setLang && setLang('ja')")
+            await page.wait_for_timeout(300)
+            ja = await page.evaluate(
+                "document.body.innerText.match(/[\\u3040-\\u30ff]/) ? true : false")
+            if not ja:
+                problems.append("login page: ja switch produced no Japanese (kana) text")
+        except Exception as e:
+            problems.append(f"login page: setLang('ja') threw: {e}")
 
         # --- 2. Post-login (only with creds): Settings must render ------------
         if user and password:
@@ -92,6 +103,13 @@ async def run(base_url: str, user: str | None, password: str | None) -> int:
                 "?.match(/[\\u4e00-\\u9fff]/)")
             if not nav_zh:
                 problems.append("main page: nav not Chinese after zh-TW switch")
+            await page.evaluate("setLang && setLang('ja')")
+            await page.wait_for_timeout(400)
+            nav_ja = await page.evaluate(
+                "!!document.querySelector('nav, .sidebar')?.innerText"
+                "?.match(/[\\u3040-\\u30ff]/)")
+            if not nav_ja:
+                problems.append("main page: nav not Japanese after ja switch")
 
             # --- Dashboard stat values must never be CLIPPED --------------
             # `.stat-card` sets overflow:hidden for the sparkline, so a value

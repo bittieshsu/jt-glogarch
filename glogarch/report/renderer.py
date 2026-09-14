@@ -114,6 +114,7 @@ async def html_to_pdf(
     toc_titles: list | None = None,
     landscape: bool = False,
     with_header_footer: bool = True,
+    lang: str = "",
 ) -> bytes:
     """Render a full HTML document to PDF bytes via headless Chromium."""
     from playwright.async_api import async_playwright
@@ -156,14 +157,30 @@ async def html_to_pdf(
             )
             if with_header_footer:
                 pdf = _draw_bands(pdf, brand_color, report_title, header_text,
-                                  header_logo, generated_at)
+                                  header_logo, generated_at, lang=lang)
             if toc_titles:
                 pdf = _add_toc_page_numbers(pdf, toc_titles, brand_color)
             if watermark and watermark.get("text"):
-                pdf = _apply_watermark(pdf, watermark)
+                pdf = _apply_watermark(pdf, watermark, lang=lang)
             return pdf
         finally:
             await browser.close()
+
+
+def _find_section_page(page_texts: list, title: str, first: int):
+    """0-based index of the page where the section `title` starts, searching from
+    `first`. A page where the title is a LINE OF ITS OWN (the section heading)
+    wins over one that merely mentions it: the summary sentence "…jobs and
+    operation audit…" contains the "Operation Audit" title, and a substring match
+    pointed that TOC entry at the summary page. Falls back to a substring match
+    so a heading wrapped across two lines is still found."""
+    for i in range(first, len(page_texts)):
+        if any(ln.strip() == title for ln in page_texts[i].split("\n")):
+            return i
+    for i in range(first, len(page_texts)):
+        if title in page_texts[i]:
+            return i
+    return None
 
 
 def _add_toc_page_numbers(pdf: bytes, toc_titles: list, brand_color: str) -> bytes:
@@ -197,15 +214,13 @@ def _add_toc_page_numbers(pdf: bytes, toc_titles: list, brand_color: str) -> byt
         right = doc[toc_page].rect.width - 16 * _MM
         rgb = _hex_to_rgb01(brand_color)
         outline = []
+        page_texts = [doc[i].get_text() for i in range(n)]
         for t in titles:
             # 2) Section start page = first page AFTER the TOC that shows the header.
-            start = None
-            for i in range(toc_page + 1, n):
-                if t in doc[i].get_text():
-                    start = i + 1  # 1-based
-                    break
-            if start is None:
+            idx = _find_section_page(page_texts, t, toc_page + 1)
+            if idx is None:
                 continue
+            start = idx + 1  # 1-based
             # 3) Draw the number right-aligned on this entry's TOC line. Use
             #    point-based insert_text (insert_textbox silently drops text that
             #    doesn't fit its box); compute the x so it's right-aligned.
@@ -236,7 +251,7 @@ def _add_toc_page_numbers(pdf: bytes, toc_titles: list, brand_color: str) -> byt
         return pdf
 
 
-def _apply_watermark(pdf: bytes, wm: dict) -> bytes:
+def _apply_watermark(pdf: bytes, wm: dict, lang: str = "") -> bytes:
     """Stamp a flattened, tiled text watermark over every page. Rendered as a
     transparent PNG (via PIL) and inserted as an image, so it is NOT selectable
     and cannot be deleted without editing the PDF content stream. Best-effort."""
@@ -253,7 +268,7 @@ def _apply_watermark(pdf: bytes, wm: dict) -> bytes:
         angle = 45 if wm.get("direction", "diagonal") == "diagonal" else 0
         fontsize = {"small": 30, "medium": 46, "large": 70}.get(wm.get("size", "large"), 70)
         opacity = int(255 * float(wm.get("opacity", 0.10)))
-        fontfile = _find_cjk_font()
+        fontfile = _find_cjk_font(lang)
         W, H = 1240, 1754  # ~150dpi A4 portrait canvas
         canvas = Image.new("RGBA", (W, H), (0, 0, 0, 0))
         d0 = ImageDraw.Draw(canvas)
@@ -320,9 +335,19 @@ import glob as _glob
 import os as _os
 
 
-def _find_cjk_font():
-    """A CJK-capable TTF/TTC/OTF so fitz can draw Chinese header/footer text."""
-    for p in (_glob.glob("/usr/share/fonts/truetype/jt-glogarch/*.tt[cf]")
+def _find_cjk_font(lang: str | None = None):
+    """A CJK-capable TTF/TTC/OTF so fitz can draw Chinese/Japanese header/footer text.
+
+    Japanese first tries faces whose DEFAULT (index 0) glyphs are Japanese — the
+    Noto CJK collection lists JP first, then IPA Gothic — because the same code
+    point (直, 骨) is drawn with a different shape by a Chinese face. Falls back
+    to the Chinese-first order, which still covers kana."""
+    jp = []
+    if lang == "ja":
+        jp = (sorted(_glob.glob("/usr/share/fonts/**/NotoSansCJK*-Regular.ttc", recursive=True))
+              + _glob.glob("/usr/share/fonts/**/NotoSansCJKjp*.[ot]tf", recursive=True)
+              + _glob.glob("/usr/share/fonts/**/ipag*.ttf", recursive=True))
+    for p in (jp + _glob.glob("/usr/share/fonts/truetype/jt-glogarch/*.tt[cf]")
               + ["/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"]
               + _glob.glob("/usr/share/fonts/**/NotoSansCJK*.[ot]t[cf]", recursive=True)
               + _glob.glob("/usr/share/fonts/**/wqy*.tt[cf]", recursive=True)):
@@ -335,7 +360,7 @@ _MM = 72 / 25.4
 
 
 def _draw_bands(pdf: bytes, brand_color: str, report_title: str, header_text: str,
-                header_logo: str, generated_at: str) -> bytes:
+                header_logo: str, generated_at: str, lang: str = "") -> bytes:
     """Draw the brand header/footer bands ourselves (full-bleed, no right-edge
     gap) on every page EXCEPT the cover — the cover (page 0) instead gets its
     top/bottom margins painted brand so it reads as one clean block.
@@ -347,7 +372,7 @@ def _draw_bands(pdf: bytes, brand_color: str, report_title: str, header_text: st
     try:
         rgb = _hex_to_rgb01(brand_color)
         white = (1, 1, 1)
-        fontfile = _find_cjk_font()
+        fontfile = _find_cjk_font(lang)
         fontname = "cjk" if fontfile else "helv"
         band_h = _BAND_MM * _MM
         pad = 14 * _MM

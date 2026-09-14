@@ -793,12 +793,14 @@ async def rebuild_dashboard_sections(server, dashboard_id: str, *,
                             if stid in unsliceable:
                                 merged.setdefault(st_state, {}).setdefault(
                                     "search_types", {})[stid] = r
-                                widget_notes.setdefault(stid, (
-                                    "此圖表的統計（平均值／不重複計數／百分位數）無法分段合併，"
-                                    "已改以單次完整範圍查詢執行。" if lang == "zh-TW" else
-                                    "This widget's aggregation (avg / cardinality / "
-                                    "percentile) cannot be merged from slices; it ran "
-                                    "as one whole-window query."))
+                                widget_notes.setdefault(stid, {
+                                    "zh-TW": "此圖表的統計（平均值／不重複計數／百分位數）無法分段合併，"
+                                             "已改以單次完整範圍查詢執行。",
+                                    "ja": "このグラフの集計（平均／ユニーク数／パーセンタイル）は分割した"
+                                          "結果を合算できないため、期間全体を 1 回のクエリで実行しました。",
+                                }.get(lang, "This widget's aggregation (avg / cardinality / "
+                                            "percentile) cannot be merged from slices; it ran "
+                                            "as one whole-window query."))
                 results = merged
                 log.info("wide-window slicing done", sliced=len(sliceable),
                          whole=len(unsliceable), window_s=window_secs)
@@ -978,8 +980,8 @@ async def rebuild_dashboard_sections(server, dashboard_id: str, *,
 
 
 def _incomplete_title(lang):
-    return ("報表資料不完整" if lang == "zh-TW"
-            else "This report is incomplete")
+    return {"zh-TW": "報表資料不完整",
+            "ja": "このレポートは不完全です"}.get(lang, "This report is incomplete")
 
 
 def _incomplete_desc(lang, waited, limit):
@@ -988,6 +990,12 @@ def _incomplete_desc(lang, waited, limit):
                 f"部分結果，圖表的時間軸也會自動縮到實際有資料的範圍——看起來像是完整報表，"
                 f"其實不是。時間範圍越大（例如三個月），越容易發生。"
                 f"請縮小時間範圍、減少 widget 數量，或提高搜尋等待秒數後重跑。")
+    if lang == "ja":
+        return (f"Graylog の検索が {int(limit)} 秒以内に完了しなかったため、このレポートには"
+                f"その時点で返された一部の結果しか含まれていません。グラフの時間軸も実際にデータが"
+                f"ある範囲に自動的に縮められるため、完全なレポートに見えますが、そうではありません。"
+                f"期間が長いほど（例：3 か月）発生しやすくなります。"
+                f"期間を狭める、ウィジェット数を減らす、または検索の待機秒数を増やしてから再実行してください。")
     return (f"Graylog's search did not finish within {int(limit)}s, so this report contains "
             f"only the partial results available at that point, and chart axes have been "
             f"clamped to the shortened data extent — it looks complete but is not. "
@@ -1005,6 +1013,8 @@ def _rebuild_desc(lang, n, secs):
     hrs = secs // 3600
     if lang == "zh-TW":
         return f"由 Graylog 儀表板重現的 {n} 個 widget（時間範圍：近 {hrs} 小時）。"
+    if lang == "ja":
+        return f"Graylog ダッシュボードから再構築した {n} 個のウィジェット（期間：直近 {hrs} 時間）。"
     return f"{n} widgets rebuilt from the Graylog dashboard (time range: last {hrs}h)."
 
 
@@ -1158,7 +1168,11 @@ def _pivot_to_widget(cfg: dict, title: str, res: dict, *, bar_horizontal: bool =
         # reads as the complete population.
         cap_note = None
         if len(disp) > 15:
-            cap_note = f"僅顯示前 15 名（共 {len(disp)} 項）/ top 15 of {len(disp)}"
+            # Was one bilingual string for every report ("僅顯示前 15 名… / top 15
+            # of N"), so English reports carried Chinese. Follow the report language.
+            cap_note = {"zh-TW": f"僅顯示前 15 名（共 {len(disp)} 項）",
+                        "ja": f"上位 15 件のみ表示（全 {len(disp)} 件）",
+                        }.get(lang, f"top 15 of {len(disp)}")
         return {"kind": "chart", "title": title, "unit": unit,
                 "description": cap_note,
                 "config": _bar_multi([l for l, _ in top], [{"label": title, "data": [v for _, v in top]}],
@@ -1398,7 +1412,7 @@ def _range_label(secs, lang="zh-TW", start=None, end=None):
     fmt = "%Y-%m-%d %H:%M"
     span = f"{start_dt.strftime(fmt)} ~ {now.strftime(fmt)}"
     base = _span_words(secs, lang)
-    label = f"{base}（{span}）" if lang == "zh-TW" else f"{base} ({span})"
+    label = f"{base}（{span}）" if lang in ("zh-TW", "ja") else f"{base} ({span})"
 
     # State the REQUESTED window too when the data covers materially less, so
     # "asked 90 days, only 6 days of data exist" can never read as "only 6 days
@@ -1407,6 +1421,8 @@ def _range_label(secs, lang="zh-TW", start=None, end=None):
         want = _span_words(requested_secs, lang)
         if lang == "zh-TW":
             label += f"　⚠ 查詢範圍為{want}，此區間內僅有以上時段有資料"
+        elif lang == "ja":
+            label += f"　⚠ 要求された期間は{want}ですが、データがあるのは上記の期間のみです"
         else:
             label += f"  ⚠ requested {want}; data exists only for the range shown"
     return label
@@ -1415,12 +1431,14 @@ def _range_label(secs, lang="zh-TW", start=None, end=None):
 def _span_words(secs: int, lang: str = "zh-TW") -> str:
     """'最近 90 天' / 'Last 90d' for a span in seconds."""
     secs = int(secs or 0)
+    words = {"zh-TW": ("最近 {} 天", "最近 {} 小時", "最近 {} 分鐘"),
+             "ja": ("直近 {} 日", "直近 {} 時間", "直近 {} 分")}.get(
+                 lang, ("Last {}d", "Last {}h", "Last {}m"))
     if secs and secs % 86400 == 0:
-        return f"最近 {secs // 86400} 天" if lang == "zh-TW" else f"Last {secs // 86400}d"
+        return words[0].format(secs // 86400)
     if secs and secs % 3600 == 0:
-        return f"最近 {secs // 3600} 小時" if lang == "zh-TW" else f"Last {secs // 3600}h"
-    n = max(1, secs // 60)
-    return f"最近 {n} 分鐘" if lang == "zh-TW" else f"Last {n}m"
+        return words[1].format(secs // 3600)
+    return words[2].format(max(1, secs // 60))
 
 
 def _series_label(s):
@@ -1581,11 +1599,15 @@ def _rows_note(total_rows: int, shown: int, lang: str = "zh-TW") -> str:
     table represents, and a truncated table must say what it is a subset OF
     ("40 of 128"), not merely that it was truncated.
     """
-    zh = lang == "zh-TW"
+    if lang == "zh-TW":
+        return (f"顯示前 {shown:,} 筆，共 {total_rows:,} 筆" if shown < total_rows
+                else f"共 {total_rows:,} 筆")
+    if lang == "ja":
+        return (f"全 {total_rows:,} 件中 先頭 {shown:,} 件を表示" if shown < total_rows
+                else f"全 {total_rows:,} 件")
     if shown < total_rows:
-        return (f"顯示前 {shown:,} 筆，共 {total_rows:,} 筆"
-                if zh else f"showing first {shown:,} of {total_rows:,} rows")
-    return f"共 {total_rows:,} 筆" if zh else f"{total_rows:,} rows"
+        return f"showing first {shown:,} of {total_rows:,} rows"
+    return f"{total_rows:,} rows"
 
 
 def _barmode(cfg: dict) -> str:
@@ -1820,9 +1842,9 @@ def _messages_to_table(cfg, title, res, max_rows, max_cols=0, date_fields=None, 
     shown = min(total, max_rows) if (max_rows and max_rows > 0) else total
     notes = [_rows_note(total, shown, lang)]
     if cols_omitted:
-        notes.append(f"省略 {cols_omitted} 欄" if lang == "zh-TW"
-                     else f"{cols_omitted} more column(s)")
-    out["rows_note"] = ("、".join(notes) if lang == "zh-TW" else " · ".join(notes))
+        notes.append({"zh-TW": f"省略 {cols_omitted} 欄",
+                      "ja": f"{cols_omitted} 列を省略"}.get(lang, f"{cols_omitted} more column(s)"))
+    out["rows_note"] = ("、".join(notes) if lang in ("zh-TW", "ja") else " · ".join(notes))
     return out
 
 
@@ -2148,12 +2170,21 @@ def archive_summary_sections(db, lang: str = "zh-TW") -> tuple[dict, list[dict]]
             "chart_msgs": "Records archived / day", "sec_jobs": "Jobs Overview", "chart_jobs": "Job outcomes",
             "jobs_desc": "Recent export/import/cleanup/verify job results.", "sec_audit": "Operation Audit",
             "audit_desc": "Graylog operation audit — last 7 days.", "chart_ops": "Operations / day",
-            "ok": "Completed", "failed": "Failed", "running": "Running", "cancelled": "Cancelled"}}
+            "ok": "Completed", "failed": "Failed", "running": "Running", "cancelled": "Cancelled"},
+         "ja": {
+            "kpi_arch": "アーカイブ数", "kpi_msgs": "レコード総数", "kpi_size": "圧縮後サイズ", "kpi_orig": "元のサイズ",
+            "sec_trend": "アーカイブ推移（直近 30 日）", "trend_desc": "1 日あたりに新しくアーカイブされたレコード数。",
+            "chart_msgs": "1 日あたりのアーカイブレコード数", "sec_jobs": "ジョブ概況", "chart_jobs": "ジョブ結果の内訳",
+            "jobs_desc": "最近のエクスポート／インポート／クリーンアップ／検証ジョブの結果。", "sec_audit": "操作監査",
+            "audit_desc": "直近 7 日間の Graylog 操作監査の統計。", "chart_ops": "1 日あたりの操作数",
+            "ok": "成功", "failed": "失敗", "running": "実行中", "cancelled": "キャンセル"}}
     t = L.get(lang, L["zh-TW"])
 
     stats = db.get_archive_stats()
     kpis = [
-        {"value": _fmt_n(stats.get("total_archives", 0)), "label": t["kpi_arch"]},
+        # get_archive_stats() names the count `total`; reading `total_archives`
+        # made this KPI 0 on every report, in every language.
+        {"value": _fmt_n(stats.get("total", stats.get("total_archives", 0))), "label": t["kpi_arch"]},
         {"value": _fmt_n(stats.get("total_messages", 0)), "label": t["kpi_msgs"]},
         {"value": _fmt_bytes(stats.get("total_bytes", 0)), "label": t["kpi_size"]},
         {"value": _fmt_bytes(stats.get("total_original_bytes", 0) or 0), "label": t["kpi_orig"]},

@@ -2185,6 +2185,9 @@ async def test_notify(request: Request):
     if config.language == "zh-TW":
         title = "測試通知"
         body = "這是一則來自 jt-glogarch 的測試通知。"
+    elif config.language == "ja":
+        title = "テスト通知"
+        body = "これは jt-glogarch からのテスト通知です。"
     else:
         title = "Test Notification"
         body = "This is a test notification from jt-glogarch."

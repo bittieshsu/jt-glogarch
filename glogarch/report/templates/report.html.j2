@@ -7,7 +7,9 @@
   * { box-sizing: border-box; }
   html, body { margin:0; padding:0; }
   body {
-    font-family: "Noto Sans CJK TC","Noto Sans CJK SC","WenQuanYi Zen Hei","PingFang TC","Microsoft JhengHei","Helvetica Neue",Arial,sans-serif;
+    {#- Japanese first when the report is Japanese: the same code point is drawn
+        with Japanese glyph shapes (e.g. 直, 骨) only by a JP face. #}
+    font-family: {% if report.lang == 'ja' %}"Noto Sans CJK JP","IPAGothic","IPAPGothic",{% endif %}"Noto Sans CJK TC","Noto Sans CJK SC","WenQuanYi Zen Hei","PingFang TC","Microsoft JhengHei","Helvetica Neue",Arial,sans-serif;
     color: var(--ink); font-size: 12px; line-height: 1.55; -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
   .page { page-break-after: always; padding: 0 16mm; }

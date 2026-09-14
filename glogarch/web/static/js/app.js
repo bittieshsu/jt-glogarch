@@ -3673,6 +3673,7 @@ async function loadNotifySettings() {
             <select id="nf-language">
                 <option value="en" ${data.language === 'en' ? 'selected' : ''}>English</option>
                 <option value="zh-TW" ${data.language === 'zh-TW' ? 'selected' : ''}>繁體中文</option>
+                <option value="ja" ${data.language === 'ja' ? 'selected' : ''}>日本語</option>
             </select>
         </div>`;
         initCustomSelects();
@@ -4981,42 +4982,48 @@ async function clearTargetIndexSet() {
 // against real firings: '0 3 1-7 * 6' fires Saturdays. (v1.13.75 labelled it
 // 週日 by reading the raw-from_crontab pitfall note and missing the wrapper.)
 function cronHuman(expr) {
-    const zh = getLang() === 'zh-TW';
+    const lang = getLang();
+    const zh = lang === 'zh-TW', ja = lang === 'ja';
     const p = (expr || '').trim().split(/\s+/);
     if (p.length !== 5) return expr || '';
     const [min, hr, dom, mon, dow] = p;
     const DOW = zh ? ['日', '一', '二', '三', '四', '五', '六', '日']
+              : ja ? ['日', '月', '火', '水', '木', '金', '土', '日']
                    : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     const num = v => /^\d+$/.test(v);
     const pad = v => String(v).padStart(2, '0');
     const hhmm = (num(hr) && num(min)) ? `${pad(hr)}:${pad(min)}` : null;
     const dowName = v => {
-        const one = x => num(x) && +x <= 7 ? (zh ? '週' + DOW[+x] : DOW[+x]) : null;
+        const one = x => num(x) && +x <= 7 ? (zh ? '週' + DOW[+x] : ja ? DOW[+x] + '曜' : DOW[+x]) : null;
         if (num(v)) return one(v);
         const r = v.match(/^(\d)-(\d)$/);
-        if (r && one(r[1]) && one(r[2])) return one(r[1]) + (zh ? '至' : '–') + (zh ? DOW[+r[2]] : DOW[+r[2]]);
+        if (r && one(r[1]) && one(r[2]))
+            return zh ? one(r[1]) + '至' + DOW[+r[2]]
+                 : ja ? one(r[1]) + '〜' + one(r[2])
+                      : one(r[1]) + '–' + DOW[+r[2]];
         return null;
     };
     const domTxt = v => {
-        if (num(v)) return zh ? `${+v} 日` : `day ${+v}`;
+        if (num(v)) return zh ? `${+v} 日` : ja ? `${+v}日` : `day ${+v}`;
         const r = v.match(/^(\d+)-(\d+)$/);
-        if (r) return zh ? `${+r[1]}–${+r[2]} 日` : `days ${+r[1]}–${+r[2]}`;
+        if (r) return zh ? `${+r[1]}–${+r[2]} 日` : ja ? `${+r[1]}〜${+r[2]}日` : `days ${+r[1]}–${+r[2]}`;
         return null;
     };
     let m;
     if ((m = min.match(/^\*\/(\d+)$/)) && hr === '*' && dom === '*' && mon === '*' && dow === '*')
-        return zh ? `每 ${+m[1]} 分鐘` : `every ${+m[1]} min`;
+        return zh ? `每 ${+m[1]} 分鐘` : ja ? `${+m[1]}分ごと` : `every ${+m[1]} min`;
     if (min === '0' && (m = hr.match(/^\*\/(\d+)$/)) && dom === '*' && mon === '*' && dow === '*')
-        return zh ? `每 ${+m[1]} 小時` : `every ${+m[1]} h`;
+        return zh ? `每 ${+m[1]} 小時` : ja ? `${+m[1]}時間ごと` : `every ${+m[1]} h`;
     if (!hhmm) return expr;
     if (dom === '*' && mon === '*' && dow === '*')
-        return zh ? `每天 ${hhmm}` : `daily ${hhmm}`;
+        return zh ? `每天 ${hhmm}` : ja ? `毎日 ${hhmm}` : `daily ${hhmm}`;
     if (dom === '*' && mon === '*' && dowName(dow))
-        return (zh ? `每${dowName(dow)} ` : `${dowName(dow)} `) + hhmm;
+        return (zh ? `每${dowName(dow)} ` : ja ? `毎週${dowName(dow)} ` : `${dowName(dow)} `) + hhmm;
     if (mon === '*' && dow === '*' && domTxt(dom))
-        return (zh ? `每月 ${domTxt(dom)} ` : `monthly ${domTxt(dom)} `) + hhmm;
+        return (zh ? `每月 ${domTxt(dom)} ` : ja ? `毎月${domTxt(dom)} ` : `monthly ${domTxt(dom)} `) + hhmm;
     if (mon === '*' && domTxt(dom) && dowName(dow))
         return zh ? `每月 ${domTxt(dom)} 且${dowName(dow)} ${hhmm}`
+             : ja ? `毎月${domTxt(dom)}かつ${dowName(dow)} ${hhmm}`
                   : `${domTxt(dom)} & ${dowName(dow)} ${hhmm}`;
     return expr;
 }
@@ -5304,16 +5311,21 @@ async function openReportModal(name) {
     let _mwList = ['0', '10', '20', '30', '50'];
     if (!_mwList.includes(_mwVal)) _mwList.push(_mwVal);
     const _mwSelect = `<select id="rp-maxw" class="no-custom">${_mwList.map(v => `<option value="${v}"${v===_mwVal?' selected':''}>${v==='0'?esc(t('reports_maxw_all')):v}</option>`).join('')}</select>`;
+    // A saved report keeps its language (none saved = the generator's zh-TW
+    // default). A NEW report starts in the language the operator is using.
+    const _rpLang = cfg.lang || (existing ? 'zh-TW' : getLang());
+    const _rpLangSelect = `<select id="rp-lang" class="no-custom">${[['zh-TW', '繁體中文'], ['en', 'English'], ['ja', '日本語']]
+        .map(([v, l]) => `<option value="${v}"${_rpLang === v ? ' selected' : ''}>${l}</option>`).join('')}</select>`;
     document.getElementById('report-modal-form').innerHTML = `
       <input type="hidden" id="rp-orig" value="${esc(cfg.__name||'')}">
       <input type="hidden" id="rp-id" value="${esc(cfg.__id!==undefined&&cfg.__id!==null?String(cfg.__id):'')}">
       <div class="form-group"><label>${t('reports_f_name')}</label><input type="text" id="rp-name" value="${esc(cfg.__name||'')}" placeholder="weekly-security">${existing?`<div class="text-muted fs-08 mt3">${t('reports_name_editable_hint')}</div>`:''}</div>
-      <div class="form-group"><label>${t('reports_f_title')}</label><input type="text" id="rp-title" value="${esc(cfg.title||'')}" placeholder="安全事件週報"></div>
+      <div class="form-group"><label>${t('reports_f_title')}</label><input type="text" id="rp-title" value="${esc(cfg.title||'')}" placeholder="${esc(t('reports_title_ph'))}"></div>
       <div class="form-group"><label>${t('reports_f_subtitle')}</label><input type="text" id="rp-subtitle" value="${esc(cfg.subtitle||'')}"></div>
       <div class="form-group"><label>${t('reports_f_author')}</label><input type="text" id="rp-author" value="${esc(cfg.author||'')}"></div>
       <div class="form-group"><label>${t('reports_f_lang')}</label>
-        <select id="rp-lang" class="no-custom"><option value="zh-TW"${cfg.lang!=='en'?' selected':''}>繁體中文</option><option value="en"${cfg.lang==='en'?' selected':''}>English</option></select></div>
-      <div class="form-group"><label>${t('reports_f_header')}</label><input type="text" id="rp-header" value="${esc(cfg.header_text||'')}" placeholder="機密"></div>
+        ${_rpLangSelect}</div>
+      <div class="form-group"><label>${t('reports_f_header')}</label><input type="text" id="rp-header" value="${esc(cfg.header_text||'')}" placeholder="${esc(t('reports_wm_text_ph'))}"></div>
       ${_reportLogoField('rp-logo', cfg.logo_data_uri, 'logo-preview-cover', 'reports_f_logo', 'reports_logo_hint')}
       <div class="form-group"><label>${t('reports_f_logo_size')}</label><input type="number" id="rp-logo-size" min="20" max="200" step="2" value="${esc(String(cfg.logo_height_px||72))}" style="max-width:120px"> <span class="text-muted fs-08">px</span></div>
       ${_reportLogoField('rp-hlogo', cfg.header_logo_data_uri, 'logo-preview-dark', 'reports_f_hlogo_dark', 'reports_hlogo_dark_hint')}

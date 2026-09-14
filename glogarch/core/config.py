@@ -173,7 +173,7 @@ class EmailConfig(BaseModel):
 
 
 class NotifyConfig(BaseModel):
-    language: str = "zh-TW"  # "en" or "zh-TW"
+    language: str = "zh-TW"  # "en", "zh-TW" or "ja"
     on_export_complete: bool = True
     on_import_complete: bool = True
     on_cleanup_complete: bool = False

@@ -292,8 +292,9 @@ async def generate_report(db, settings, cfg: dict, *, triggered_by: str = "manua
     # Watermark (flattened, tiled) — text + any auto-appended context fields.
     watermark = None
     if cfg.get("watermark_enabled"):
-        # Blank text defaults to 機密 / CONFIDENTIAL.
-        base_text = (cfg.get("watermark_text") or "").strip() or ("機密" if lang == "zh-TW" else "CONFIDENTIAL")
+        # Blank text defaults to 機密 / 社外秘 / CONFIDENTIAL.
+        base_text = ((cfg.get("watermark_text") or "").strip()
+                     or {"zh-TW": "機密", "ja": "社外秘"}.get(lang, "CONFIDENTIAL"))
         parts = [base_text]
         ap = cfg.get("watermark_append") or []
         if "server" in ap and cfg.get("server"):
@@ -348,7 +349,7 @@ async def generate_report(db, settings, cfg: dict, *, triggered_by: str = "manua
         brand_color=report.get("brand_color", "#6c63ff"),
         watermark=watermark,
         toc_titles=[s.get("title") for s in sections if s.get("title")],
-        generated_at=report["generated_at"])
+        generated_at=report["generated_at"], lang=lang)
 
     # Save
     ts = now.strftime("%Y%m%dT%H%M%S")
@@ -435,13 +436,15 @@ def _email_pdf(settings, recipients, subject_title, pdf: bytes, filename: str, l
     now = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M %z")
     mb = len(pdf) / (1024 * 1024)
     size = f"{mb:.2f} MB" if mb >= 1 else f"{len(pdf) / 1024:.0f} KB"
-    L = ({"intro": "jt-glogarch 已為您產生下列報表，PDF 檔案已附於本信。",
-          "report": "報表名稱", "generated": "產製時間", "file": "檔案名稱",
-          "footer": "本信由 jt-glogarch 自動寄送"}
-         if lang == "zh-TW" else
-         {"intro": "jt-glogarch has generated the following report. The PDF is attached.",
-          "report": "Report", "generated": "Generated", "file": "File",
-          "footer": "Sent automatically by jt-glogarch"})
+    L = {"zh-TW": {"intro": "jt-glogarch 已為您產生下列報表，PDF 檔案已附於本信。",
+                   "report": "報表名稱", "generated": "產製時間", "file": "檔案名稱",
+                   "footer": "本信由 jt-glogarch 自動寄送"},
+         "ja": {"intro": "jt-glogarch が次のレポートを作成しました。PDF ファイルを添付しています。",
+                "report": "レポート名", "generated": "作成日時", "file": "ファイル名",
+                "footer": "このメールは jt-glogarch から自動送信されています"},
+         }.get(lang, {"intro": "jt-glogarch has generated the following report. The PDF is attached.",
+                      "report": "Report", "generated": "Generated", "file": "File",
+                      "footer": "Sent automatically by jt-glogarch"})
     # Plain-text fallback + a polished HTML body (mirrors the notification email).
     msg.set_content(f"{subject_title}\n\n{L['intro']}\n\n"
                     f"{L['report']}: {subject_title}\n{L['generated']}: {now}\n"
@@ -476,6 +479,8 @@ def _email_pdf(settings, recipients, subject_title, pdf: bytes, filename: str, l
 def _default_summary(lang, kpis):
     if lang == "zh-TW":
         return "本報表由 jt-glogarch 自動產生，涵蓋記錄封存、作業與操作稽核之概況統計。"
+    if lang == "ja":
+        return "このレポートは jt-glogarch によって自動作成され、ログのアーカイブ、ジョブ、操作監査の概況をまとめています。"
     return "This report is generated automatically by jt-glogarch, summarising log archiving, jobs, and operation audit activity."
 
 
@@ -486,6 +491,9 @@ _TXT = {
     "en": {"native": "Native capture of the Graylog dashboard.", "no_content": "No content",
            "no_capture": "(dashboard capture unavailable — set Graylog web credentials in the report)",
            "rebuild_empty": "(could not rebuild widgets from this dashboard — search timed out or returned no data)"},
+    "ja": {"native": "Graylog ダッシュボードのネイティブキャプチャです。", "no_content": "レポートの内容がありません",
+           "no_capture": "（ダッシュボード画面を取得できませんでした。レポートに Graylog Web のログイン情報が設定されているか確認してください）",
+           "rebuild_empty": "（このダッシュボードのウィジェットを再構築できませんでした。検索がタイムアウトしたか、データがありません）"},
 }
 
 
