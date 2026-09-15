@@ -237,6 +237,12 @@ class Settings(BaseModel):
     def config_path(self) -> str:
         return self._config_path
 
+    def has_server(self, name: str | None) -> bool:
+        """Is `name` a configured server? `get_server()` falls back to the first
+        server for an unknown name, so callers that must not silently archive a
+        different server check this first."""
+        return bool(name) and any(s.name == name for s in self.servers)
+
     def get_server(self, name: str | None = None) -> GraylogServerConfig:
         """Get server config by name, or the default server."""
         target = name or self.default_server

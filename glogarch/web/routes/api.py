@@ -201,6 +201,19 @@ def delete_archive(request: Request, archive_id: int):
     archive = db.get_archive(archive_id)
     if not archive:
         return JSONResponse({"error": "Archive not found"}, status_code=404)
+    # Another admin's restore may be reading this file right now; unlinking it
+    # mid-read fails that import and drops the archive from coverage.
+    try:
+        from glogarch.import_.importer import _active_archive_imports
+        owner = _active_archive_imports.get(archive_id)
+    except Exception as e:
+        log.debug("Import registry unavailable while deleting an archive", error=str(e))
+        owner = None
+    if owner:
+        return JSONResponse(
+            {"error": f"This archive is being imported right now (job {owner[:8]}). "
+                      f"Wait for that import to finish, or cancel it first.",
+             "code": "archive_in_use"}, status_code=409)
 
     storage = ArchiveStorage(settings.export)
     try:
@@ -1076,7 +1089,7 @@ def get_job(request: Request, job_id: str):
                 "messages_done": last.get("messages_done", 0),
                 "messages_total": last.get("messages_total"),
                 "error_message": last.get("error"),
-                "started_at": None,
+                "started_at": (db_job.started_at.isoformat() if db_job and db_job.started_at else None),
                 "completed_at": None,
             }
         # Job started but no progress yet — still running
@@ -1092,6 +1105,37 @@ def get_job(request: Request, job_id: str):
 @router.post("/jobs/{job_id}/cancel")
 def cancel_job(request: Request, job_id: str):
     """Cancel a running job."""
+    # Refuse BEFORE touching any flag when the job has already ended. Every
+    # administrator's Task Log used to be a snapshot of the moment they opened it,
+    # so a job that had finished (or been cancelled by someone else) could still
+    # show a Cancel button on another admin's screen — and that click set the
+    # cancel flags and was audited as a cancellation regardless. 409 carries the
+    # real status so the page can say so instead of pretending it cancelled.
+    db = _db(request)
+    job = db.get_job(job_id)
+    if job and job.status.value not in ("running", "pending"):
+        return JSONResponse({"error": "Job is not running", "status": job.status.value},
+                            status_code=409)
+    if job is None:
+        # A run that never got a DB row (e.g. one refused by the export lock)
+        # lives only in memory; if its last event ended it, it is just as
+        # finished as a DB row saying so.
+        events = _job_progress.get(job_id) or []
+        last_phase = events[-1].get("phase") if events else None
+        ended = {"error": "failed", "done": "completed", "cancelled": "cancelled"}.get(last_phase)
+        if ended:
+            return JSONResponse({"error": "Job is not running", "status": ended}, status_code=409)
+        if job_id not in _job_progress:
+            try:
+                from glogarch.import_.importer import get_import_control
+                from glogarch.export.exporter import get_export_control
+                known = bool(get_import_control(job_id) or get_export_control(job_id))
+            except Exception as e:
+                log.debug("Live job registries unavailable while resolving a cancel", error=str(e))
+                known = False
+            if not known:
+                return JSONResponse({"error": "Job not found"}, status_code=404)
+
     # Set cancellation flag for background task (works for both in-memory and DB jobs)
     _cancel_flags[job_id] = True
 
@@ -1134,13 +1178,11 @@ def cancel_job(request: Request, job_id: str):
         _audit(request, "job_cancelled", f"job={job_id}")
         return {"status": "cancelled", "id": job_id}
 
-    # Fallback to DB jobs
-    db = _db(request)
-    job = db.get_job(job_id)
+    # Fallback to DB jobs (an ended or unknown job was already refused above)
     if not job:
-        return JSONResponse({"error": "Job not found"}, status_code=404)
-    if job.status.value not in ("running", "pending"):
-        return JSONResponse({"error": "Job is not running"}, status_code=400)
+        # known only to a live registry — the signals above did the cancelling
+        _audit(request, "job_cancelled", f"job={job_id}")
+        return {"status": "cancelled", "id": job_id}
     db.update_job(job_id, status=JobStatus.CANCELLED, completed_at=datetime.utcnow())
     _audit(request, "job_cancelled", f"job={job_id}")
     return {"status": "cancelled", "id": job_id}
@@ -1243,29 +1285,53 @@ async def save_schedule(request: Request):
     db = _db(request)
     from glogarch.core.models import ScheduleRecord
     import json as _json
+    # An EDIT arrives with the fields the form shows — but the form has no
+    # "enabled" switch and never saved the server it offers. The old handler
+    # defaulted `enabled` to True, so editing a schedule another admin had
+    # disabled for maintenance silently switched it back on, and it dropped
+    # `server`, so every UI-created export schedule ran against the default
+    # server. Merge onto the stored record: what the form does not send, it keeps.
+    job_type = body.get("job_type", "export")
+    existing = next((s for s in db.list_schedules() if s.name == body["name"]), None)
+    old_cfg = {}
+    if existing and existing.config_json and existing.job_type == job_type:
+        try:
+            old_cfg = _json.loads(existing.config_json) or {}
+        except Exception as e:
+            log.warning("Stored schedule config unreadable — saving only the submitted fields",
+                        name=body["name"], error=str(e))
     config_data = {}
-    if body.get("job_type", "export") == "export":
-        config_data = {
+    if job_type == "export":
+        server = (body.get("server") or "").strip()
+        if server and not _settings(request).has_server(server):
+            return JSONResponse({"error": f"Unknown Graylog server '{server}'"}, status_code=400)
+        config_data = dict(old_cfg)
+        config_data.update({
             "mode": body.get("mode", "api"),
             "days": body.get("days", 180),
             "index_set": body.get("index_set", ""),
             "streams": body.get("streams", []),
             "auto_resume": True,
-        }
+        })
+        if server:
+            config_data["server"] = server
         if body.get("keep_indices"):
             config_data["keep_indices"] = int(body["keep_indices"])
-    elif body.get("job_type") == "cleanup":
+        else:
+            config_data.pop("keep_indices", None)
+    elif job_type == "cleanup":
         config_data = {
             "retention_days": body.get("retention_days", _settings(request).retention.retention_days),
         }
-    elif body.get("job_type") == "report_cleanup":
+    elif job_type == "report_cleanup":
         config_data = {"days": int(body.get("days", 720) or 720)}
+    enabled = body["enabled"] if "enabled" in body else (existing.enabled if existing else True)
     sched = ScheduleRecord(
         name=body["name"],
-        job_type=body.get("job_type", "export"),
+        job_type=job_type,
         cron_expr=body["cron_expr"],
         config_json=_json.dumps(config_data) if config_data else None,
-        enabled=body.get("enabled", True),
+        enabled=enabled,
     )
     db.save_schedule(sched)
     _apply_to_runtime(request, sched)
@@ -1325,92 +1391,27 @@ async def run_schedule_now(request: Request, name: str, background_tasks: Backgr
     if sched.job_type not in ("export", "cleanup", "verify"):
         return JSONResponse({"error": "This schedule type cannot be run manually"}, status_code=400)
 
-    # Cleanup: run synchronously (fast)
-    if sched.job_type == "cleanup":
-        try:
-            cfg = _json.loads(sched.config_json) if sched.config_json else {}
-        except Exception:
-            cfg = {}
-        from glogarch.core.models import JobRecord, JobStatus, JobType
-        from glogarch.utils.sanitize import sanitize as _sanitize
-        job_id = str(uuid.uuid4())
-        try:
-            db.create_job(JobRecord(id=job_id, job_type=JobType.CLEANUP,
-                                     status=JobStatus.RUNNING,
-                                     source=f"manual:cleanup:{name}",
-                                     started_at=datetime.utcnow()))
-        except Exception:
-            job_id = ""
-        cleaner = Cleaner(settings.retention, settings.export, db, settings.op_audit)
-        try:
-            result = cleaner.cleanup()
-            mb = result.bytes_freed / (1024 * 1024)
-            if job_id:
-                try:
-                    db.update_job(job_id, status=JobStatus.COMPLETED,
-                                  messages_done=result.files_deleted,
-                                  messages_total=result.files_deleted,
-                                  progress_pct=100.0,
-                                  completed_at=datetime.utcnow(),
-                                  error_message=f"Deleted {result.files_deleted} files ({mb:.1f} MB)")
-                except Exception as e:
-                    log.warning("Cleanup job COMPLETED write failed — job may show 'running' forever", error=str(e))
-        except Exception as e:
-            if job_id:
-                try:
-                    db.update_job(job_id, status=JobStatus.FAILED,
-                                  error_message=_sanitize(str(e)),
-                                  completed_at=datetime.utcnow())
-                except Exception as e:
-                    log.warning("Cleanup job FAILED write failed — failure invisible in Job History", error=str(e))
-            raise
-        db.update_schedule_last_run(name)
-        _audit(request, "schedule_run_now", f"{name} cleanup deleted={result.files_deleted}")
-        return {"status": "completed", "files_deleted": result.files_deleted, "bytes_freed": result.bytes_freed}
-
-    # Verify: run synchronously
-    if sched.job_type == "verify":
-        from glogarch.core.models import JobRecord, JobStatus, JobType
-        from glogarch.utils.sanitize import sanitize as _sanitize
-        job_id = str(uuid.uuid4())
-        try:
-            db.create_job(JobRecord(id=job_id, job_type=JobType.VERIFY,
-                                     status=JobStatus.RUNNING,
-                                     source=f"manual:verify:{name}",
-                                     started_at=datetime.utcnow()))
-        except Exception:
-            job_id = ""
-        verifier = Verifier(settings.export, db, integrity=settings.integrity)
-        try:
-            result = verifier.verify_all()
-            note = (f"{result.valid} valid, {len(result.corrupted)} corrupted, "
-                    f"{len(result.missing_files)} missing of {result.total_checked} total")
-            status = (JobStatus.FAILED
-                      if result.corrupted or result.missing_files
-                      else JobStatus.COMPLETED)
-            if job_id:
-                try:
-                    db.update_job(job_id, status=status,
-                                  messages_done=result.total_checked,
-                                  messages_total=result.total_checked,
-                                  progress_pct=100.0,
-                                  completed_at=datetime.utcnow(),
-                                  error_message=note)
-                except Exception as e:
-                    log.warning("Verify job status write failed — corrupt/missing result not recorded", error=str(e))
-        except Exception as e:
-            if job_id:
-                try:
-                    db.update_job(job_id, status=JobStatus.FAILED,
-                                  error_message=_sanitize(str(e)),
-                                  completed_at=datetime.utcnow())
-                except Exception as e:
-                    log.warning("Verify job FAILED write failed", error=str(e))
-            raise
-        db.update_schedule_last_run(name)
-        _audit(request, "schedule_run_now", f"{name} verify total={result.total_checked} corrupted={len(result.corrupted)}")
-        return {"status": "completed", "total_checked": result.total_checked, "valid": result.valid,
-                "corrupted": len(result.corrupted), "missing": len(result.missing_files)}
+    # Cleanup / verify run in the BACKGROUND, through the scheduler's own handlers.
+    # They used to run inside this async handler, on the event loop every page,
+    # API call, SSE stream and the audit syslog listener share — a multi-hour
+    # verify made the whole service unresponsive for every administrator. The
+    # cleanup path also ignored the schedule's own retention_days and applied
+    # config.yaml's, so "Run now" could delete archives that the schedule — shown
+    # as keeping them longer — was keeping. The scheduler's handlers honour the
+    # schedule, share its "already running" guard, write the job row and last_run.
+    if sched.job_type in ("cleanup", "verify"):
+        arch = getattr(request.app.state, "scheduler", None)
+        if arch is None:
+            return JSONResponse({"error": "Scheduler is not running"}, status_code=503)
+        kind = sched.job_type
+        if arch._running_jobs.get(kind):
+            return JSONResponse({"error": f"A {kind} run is already in progress.",
+                                 "code": f"{kind}_already_running"}, status_code=409)
+        handler = arch._run_cleanup if kind == "cleanup" else arch._run_verify
+        asyncio.get_event_loop().run_in_executor(
+            None, lambda: handler(name, source=f"manual:{kind}:{name}"))
+        _audit(request, "schedule_run_now", f"{name} {kind} started")
+        return {"status": "started", "job_type": kind}
 
     cfg = {}
     if sched.config_json:
@@ -1428,6 +1429,24 @@ async def run_schedule_now(request: Request, name: str, background_tasks: Backgr
 
     time_to = datetime.utcnow()
     time_from = time_to - timedelta(days=export_days)
+
+    if cfg.get("server") and not settings.has_server(cfg.get("server")):
+        log.error("Schedule's Graylog server is not configured — Run Now uses the default "
+                  "server instead", schedule=name, server=cfg.get("server"),
+                  default=server_config.name)
+    # The same refusal /api/export already makes. Without it, Run Now while an
+    # export of this server was still running (or still unwinding from a cancel)
+    # answered "started", failed on the lock inside the thread, left NO job row,
+    # and still advanced the schedule's last_run.
+    from glogarch.export.exporter import is_export_running
+    from glogarch.opensearch.exporter import is_os_export_running
+    _use_os = export_mode == "opensearch" and settings.get_opensearch(cfg.get("server")).hosts
+    if (is_os_export_running(server_config.name) if _use_os
+            else is_export_running(server_config.name)):
+        return JSONResponse(
+            {"error": f"An export is already running for '{server_config.name}'. "
+                      f"Wait for it to finish, or cancel it from Job History first.",
+             "code": "export_already_running"}, status_code=409)
 
     job_id = str(uuid.uuid4())
     _job_progress[job_id] = []
@@ -1452,6 +1471,7 @@ async def run_schedule_now(request: Request, name: str, background_tasks: Backgr
         # Rely on per-chunk dedup instead, to avoid missing gaps.
 
         def _run_in_thread():
+            started = False
             try:
                 result = asyncio.run(os_exporter.export(
                     time_from=time_from, time_to=time_to,
@@ -1459,16 +1479,20 @@ async def run_schedule_now(request: Request, name: str, background_tasks: Backgr
                     progress_callback=_cb, source=f"manual:opensearch:{name}",
                     job_id=job_id, keep_indices=int(keep_indices) if keep_indices else None,
                 ))
+                started = True
                 _publish_export_end(job_id, result)
             except Exception as e:
+                started = db.get_job(job_id) is not None   # the exporter made its row
                 _job_progress.setdefault(job_id, []).append(
                     {"phase": "error", "error": str(e), "pct": 100}
                 )
+                _record_unstarted_job(db, job_id, f"manual:opensearch:{name}", e)
             finally:
-                try:
-                    db.update_schedule_last_run(name)
-                except Exception as e:
-                    log.warning("Schedule last_run write failed — schedule state now wrong in UI", error=str(e))
+                if started:
+                    try:
+                        db.update_schedule_last_run(name)
+                    except Exception as e:
+                        log.warning("Schedule last_run write failed — schedule state now wrong in UI", error=str(e))
     else:
         exporter = Exporter(server_config, settings.export, settings.rate_limit, db, integrity=settings.integrity)
         first_stream = stream_ids[0] if stream_ids else None
@@ -1479,22 +1503,27 @@ async def run_schedule_now(request: Request, name: str, background_tasks: Backgr
                 time_from = rp
 
         def _run_in_thread():
+            started = False
             try:
                 result = asyncio.run(exporter.export(
                     time_from=time_from, time_to=time_to,
                     streams=stream_ids, progress_callback=_cb, source=f"manual:api:{name}",
                     job_id=job_id,
                 ))
+                started = True
                 _publish_export_end(job_id, result)
             except Exception as e:
+                started = db.get_job(job_id) is not None   # the exporter made its row
                 _job_progress.setdefault(job_id, []).append(
                     {"phase": "error", "error": str(e), "pct": 100}
                 )
+                _record_unstarted_job(db, job_id, f"manual:api:{name}", e)
             finally:
-                try:
-                    db.update_schedule_last_run(name)
-                except Exception as e:
-                    log.warning("Schedule last_run write failed — schedule state now wrong in UI", error=str(e))
+                if started:
+                    try:
+                        db.update_schedule_last_run(name)
+                    except Exception as e:
+                        log.warning("Schedule last_run write failed — schedule state now wrong in UI", error=str(e))
 
     asyncio.get_event_loop().run_in_executor(None, _run_in_thread)
     _audit(request, "schedule_run_now", f"{name} mode={export_mode} job={job_id}")
@@ -2236,7 +2265,22 @@ def get_audit_status(request: Request):
 async def toggle_audit(request: Request):
     """Toggle op_audit.enabled and save to config.yaml. Requires restart."""
     settings = _settings(request)
-    new_val = not settings.op_audit.enabled
+    # The page sends the state it is asking FOR. "Flip whatever it is now" let a
+    # stale Disable button — another admin had already disabled it — switch
+    # auditing back ON (and a stale Enable switch it off), silently. A request
+    # without a body still flips, for scripts written against the old API.
+    desired = None
+    try:
+        body = await request.json()
+        if isinstance(body, dict) and "enabled" in body:
+            desired = bool(body["enabled"])
+    except Exception as e:
+        log.debug("Audit toggle without a JSON body — flipping the current state", error=str(e))
+    if desired is not None and desired == settings.op_audit.enabled:
+        return JSONResponse({"error": "Operation Audit is already in that state",
+                             "enabled": settings.op_audit.enabled,
+                             "code": "already_in_state"}, status_code=409)
+    new_val = (not settings.op_audit.enabled) if desired is None else desired
     settings.op_audit.enabled = new_val
 
     # Save to config.yaml
@@ -2775,6 +2819,35 @@ def delete_config_server(request: Request, name: str):
     settings = _settings(request)
     if not any(s.name == name for s in settings.servers):
         return JSONResponse({"error": "Server not found"}, status_code=404)
+    # Refuse while something still points at this server: an unknown server
+    # name falls back to the FIRST server, so its schedules and reports would
+    # quietly run against a different Graylog under their own names.
+    import json as _json
+    db = _db(request)
+    refs = []
+    for s in db.list_schedules():
+        try:
+            cfg = _json.loads(s.config_json) if s.config_json else {}
+        except Exception as e:
+            log.debug("Unreadable schedule config while checking server references",
+                      schedule=s.name, error=str(e))
+            cfg = {}
+        if cfg.get("server") == name:
+            refs.append(f"schedule '{s.name}'")
+    for r in db.list_reports():
+        try:
+            cfg = _json.loads(r.get("config_json") or "{}")
+        except Exception as e:
+            log.debug("Unreadable report config while checking server references",
+                      report=r.get("name"), error=str(e))
+            cfg = {}
+        if cfg.get("server") == name:
+            refs.append(f"report '{r.get('name')}'")
+    if refs:
+        return JSONResponse(
+            {"error": f"Server '{name}' is still used by {', '.join(refs)}. Point them at "
+                      f"another server first, or they would run against a different one.",
+             "code": "server_in_use", "references": refs}, status_code=409)
     settings.servers = [s for s in settings.servers if s.name != name]
     if settings.default_server == name:
         settings.default_server = settings.servers[0].name if settings.servers else ""
@@ -3179,6 +3252,31 @@ async def list_target_index_sets(request: Request):
         return JSONResponse({"error": sanitize(str(e))}, status_code=502)
 
 
+def _running_imports_into(request: Request, api_url: str) -> list[str]:
+    """Job ids of imports still running against the Graylog at `api_url`."""
+    import json as _json
+    try:
+        from glogarch.import_.importer import _import_controls
+    except Exception as e:
+        log.debug("Import registry unavailable while checking running imports", error=str(e))
+        return []
+    want = (api_url or "").rstrip("/")
+    db = _db(request)
+    hits = []
+    for jid in list(_import_controls):
+        j = db.get_job(jid)
+        if not j or j.status.value not in ("running", "pending"):
+            continue
+        try:
+            cfg = _json.loads(j.config_json) if j.config_json else {}
+        except Exception as e:
+            log.debug("Unreadable import job config while checking the target", job=jid, error=str(e))
+            cfg = {}
+        if (cfg.get("target_api_url") or "").rstrip("/") == want:
+            hits.append(jid)
+    return hits
+
+
 @router.post("/graylog/clear-index-set")
 async def clear_target_index_set(request: Request):
     """DESTRUCTIVE. Rotate, then delete every index of ONE index set on the
@@ -3200,6 +3298,16 @@ async def clear_target_index_set(request: Request):
         url, token, user, pw, verify = _target_creds(request, body)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
+    # Another admin's restore may be writing into this Graylog right now;
+    # clearing would delete what it has already imported. Refuse before
+    # touching the target at all.
+    busy = _running_imports_into(request, url)
+    if busy:
+        return JSONResponse(
+            {"error": f"An import into this Graylog is running (job {busy[0][:8]}). "
+                      f"Clearing now would delete what it has written. Wait for it to "
+                      f"finish, or cancel it first.",
+             "code": "import_running", "jobs": busy}, status_code=409)
 
     cleaner = GraylogIndexCleaner(api_url=url, api_token=token,
                                   api_username=user, api_password=pw, verify_ssl=verify)

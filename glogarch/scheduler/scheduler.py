@@ -283,6 +283,54 @@ class ArchiveScheduler:
             log.warning("Could not send stuck-schedule notification",
                         schedule=schedule_name, error=str(e))
 
+    @staticmethod
+    def _export_progress_sink():
+        """A job id + a callback that publishes a SCHEDULED export's live progress
+        where the Web UI reads it.
+
+        The scheduler used to pass no callback, so a scheduled export that paused
+        on source load never said so — no "paused, source under load" label, no
+        current index, only a counter that stopped: in Job History and the
+        sidebar that is indistinguishable from a hang, while a manual run of the
+        same export showed it. The callback never raises (cancel reaches the
+        exporter through its own registry), so it cannot change how a run behaves.
+        """
+        import uuid
+        job_id = str(uuid.uuid4())
+        try:
+            from glogarch.web.routes import api as _api
+            store = _api._job_progress
+        except Exception as e:
+            log.debug("Web progress store unavailable — scheduled export runs without "
+                      "live progress", error=str(e))
+            return job_id, None
+        store[job_id] = []
+        if len(store) > 50:
+            for k in list(store)[:-50]:          # oldest first; never drop a live run
+                ev = store.get(k) or []
+                if ev and ev[-1].get("phase") in ("done", "error", "cancelled"):
+                    store.pop(k, None)
+
+        def _cb(info):
+            try:
+                events = store.setdefault(job_id, [])
+                ev = dict(info)
+                ev["job_id"] = job_id
+                events.append(ev)
+                if len(events) > 100:
+                    del events[:-50]
+            except Exception as e:
+                log.debug("Could not publish scheduled export progress", error=str(e))
+        return job_id, _cb
+
+    @staticmethod
+    def _publish_export_end(job_id, result) -> None:
+        try:
+            from glogarch.web.routes import api as _api
+            _api._publish_export_end(job_id, result)
+        except Exception as e:
+            log.debug("Could not publish the scheduled export's final state", error=str(e))
+
     async def _run_export_once(self, schedule_name: str = "auto-export") -> None:
         """Single export attempt."""
         import json as _json
@@ -311,6 +359,10 @@ class ArchiveScheduler:
         keep_indices = cfg.get("keep_indices") or None
 
         server_config = self.settings.get_server(cfg.get("server"))
+        if cfg.get("server") and not self.settings.has_server(cfg.get("server")):
+            log.error("Schedule's Graylog server is not configured — running against the "
+                      "default server instead", schedule=schedule_name,
+                      server=cfg.get("server"), default=server_config.name)
         time_to = datetime.utcnow()
         time_from = time_to - timedelta(days=export_days)
 
@@ -330,7 +382,15 @@ class ArchiveScheduler:
             # OpenSearch: no resume point — rely on per-chunk dedup to avoid gaps
             log.info("OpenSearch mode: using full range with per-chunk dedup")
             log.info("Scheduled export starting (OpenSearch)", time_from=str(time_from), time_to=str(time_to), keep_indices=keep_indices)
-            result = await exporter.export(time_from=time_from, time_to=time_to, index_set_ids=index_set_ids, source=f"scheduled:opensearch:{schedule_name}", keep_indices=int(keep_indices) if keep_indices else None)
+            job_id, progress_cb = self._export_progress_sink()
+            try:
+                result = await exporter.export(time_from=time_from, time_to=time_to, index_set_ids=index_set_ids, source=f"scheduled:opensearch:{schedule_name}", keep_indices=int(keep_indices) if keep_indices else None,
+                                               progress_callback=progress_cb, job_id=job_id)
+            except Exception as e:
+                if progress_cb:
+                    progress_cb({"phase": "error", "error": str(e), "pct": 100})
+                raise
+            self._publish_export_end(job_id, result)
         else:
             exporter = Exporter(
                 server_config, self.settings.export,
@@ -353,7 +413,15 @@ class ArchiveScheduler:
             else:
                 log.info("No resume point found (API), using full range", stream=first_stream)
             log.info("Scheduled export starting (API)", time_from=str(time_from), time_to=str(time_to), streams=stream_ids)
-            result = await exporter.export(time_from=time_from, time_to=time_to, streams=stream_ids, source=f"scheduled:api:{schedule_name}")
+            job_id, progress_cb = self._export_progress_sink()
+            try:
+                result = await exporter.export(time_from=time_from, time_to=time_to, streams=stream_ids, source=f"scheduled:api:{schedule_name}",
+                                               progress_callback=progress_cb, job_id=job_id)
+            except Exception as e:
+                if progress_cb:
+                    progress_cb({"phase": "error", "error": str(e), "pct": 100})
+                raise
+            self._publish_export_end(job_id, result)
         log.info("Scheduled export cancelled" if getattr(result, "cancelled", False)
                  else "Scheduled export completed",
                  chunks=result.chunks_exported,
@@ -361,14 +429,15 @@ class ArchiveScheduler:
                  messages=result.messages_total,
                  index_sets_skipped=getattr(result, "index_sets_skipped", []))
 
-    def _run_cleanup(self, schedule_name: str = "auto-cleanup") -> None:
-        """Scheduled cleanup job."""
+    def _run_cleanup(self, schedule_name: str = "auto-cleanup", source: str | None = None) -> None:
+        """Scheduled cleanup job. Also the Web UI's "Run now" (`source` says so), so
+        both honour the schedule's own retention and share one running guard."""
         if self._running_jobs.get("cleanup"):
             log.warning("Cleanup already running, skipping scheduled run")
             return
 
         self._running_jobs["cleanup"] = True
-        job_id = self._create_run_job(JobType.CLEANUP, f"scheduled:cleanup:{schedule_name}")
+        job_id = self._create_run_job(JobType.CLEANUP, source or f"scheduled:cleanup:{schedule_name}")
         try:
             # Honour the retention the SCHEDULE was saved with. `POST /api/schedules`
             # stores `{"retention_days": N}` in config_json and the Schedules page
@@ -415,14 +484,14 @@ class ArchiveScheduler:
             self._running_jobs["cleanup"] = False
             self._update_schedule_last_run(schedule_name)
 
-    def _run_verify(self, schedule_name: str = "auto-verify") -> None:
+    def _run_verify(self, schedule_name: str = "auto-verify", source: str | None = None) -> None:
         """Scheduled archive verification — checks SHA256 hash of all completed archives."""
         if self._running_jobs.get("verify"):
             log.warning("Verify already running, skipping scheduled run")
             return
 
         self._running_jobs["verify"] = True
-        job_id = self._create_run_job(JobType.VERIFY, f"scheduled:verify:{schedule_name}")
+        job_id = self._create_run_job(JobType.VERIFY, source or f"scheduled:verify:{schedule_name}")
         try:
             from glogarch.verify.verifier import Verifier
             verifier = Verifier(self.settings.export, self.db, integrity=self.settings.integrity)

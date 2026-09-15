@@ -17,6 +17,7 @@ With GL_* set, the clear-section check runs against the live target; without,
 it only asserts the section's controls and collapsed state.
 """
 import asyncio
+import json
 import os
 import sys
 
@@ -381,6 +382,97 @@ async def main():
         check("no JS errors while opening the report form in Japanese", len(errs) == n2,
               "; ".join(errs[n2:])[:200])
         await pg.evaluate("setLang('en')")
+
+        # 7) job lists refresh by themselves, and Cancel confirms against the LIVE
+        # state. Admins saw different states for the same job because
+        # each Task Log was a snapshot of when it was opened, and cancelled work
+        # in progress. /api/jobs is ROUTED to fake answers here, so another
+        # admin's change can be simulated without touching a real job.
+        n3 = len(errs)
+        state = {"status": "running", "pct": 10}
+        posted = []
+
+        def _item():
+            return {"id": "uisim-job-0001", "job_type": "export", "status": state["status"],
+                    "progress_pct": state["pct"], "messages_done": 100, "messages_total": 1000,
+                    "error_message": None, "source": "manual:opensearch",
+                    "started_at": "2026-09-14T01:00:00", "completed_at": None,
+                    "phase": "", "current_detail": ""}
+
+        async def _route_list(route):
+            await route.fulfill(status=200, content_type="application/json",
+                                body=json.dumps({"items": [_item()]}))
+
+        async def _route_one(route):
+            if route.request.method == "POST":
+                posted.append(route.request.url)
+                await route.fulfill(status=409, content_type="application/json",
+                                    body=json.dumps({"error": "Job is not running",
+                                                     "status": state["status"]}))
+            else:
+                await route.fulfill(status=200, content_type="application/json",
+                                    body=json.dumps(_item()))
+
+        await pg.route("**/api/jobs?*", _route_list)
+        await pg.route("**/api/jobs/uisim-job-0001**", _route_one)
+        await pg.goto(f"{BASE}/jobs", wait_until="networkidle")
+        await pg.wait_for_timeout(1000)
+        was_running = await pg.evaluate("() => !!document.querySelector('#jobs-table .status-running')")
+        state.update(status="completed", pct=100)      # "another admin's job ended"
+        await pg.wait_for_timeout(6500)
+        now_done = await pg.evaluate(
+            "() => !!document.querySelector('#jobs-table .status-completed')"
+            " && !document.querySelector('#jobs-table .status-running')")
+        check("Task Log refreshes by itself when the job's state changes",
+              was_running and now_done, f"was_running={was_running} now_done={now_done}")
+
+        # stale row: the screen still says running, the server says it ended
+        state.update(status="running", pct=10)
+        await pg.wait_for_timeout(6500)
+        state.update(status="completed", pct=100)
+        await pg.click("#jobs-table [data-act=cancelJob]")
+        await pg.wait_for_timeout(800)
+        dialog = await pg.evaluate(
+            "() => { const m=document.getElementById('global-confirm-modal');"
+            "  return m && m.style.display === 'flex' ? document.getElementById('confirm-title').textContent : ''; }")
+        check("Cancel on a stale row explains the job already ended and sends nothing",
+              "already ended" in dialog and not posted, f"dialog={dialog!r} posted={len(posted)}")
+        await pg.evaluate("closeConfirm()")
+        await pg.unroute("**/api/jobs?*")
+        await pg.unroute("**/api/jobs/uisim-job-0001**")
+        check("no JS errors in the job-list refresh / stale-cancel flow", len(errs) == n3,
+              "; ".join(errs[n3:])[:200])
+
+        # 8) editing a schedule through the real dialog keeps it DISABLED and keeps
+        # its server. The edit form has no enabled switch; saving used to switch
+        # a schedule another admin had disabled back on, and dropped the server.
+        # Uses a throwaway schedule only; deleted afterwards.
+        n4 = len(errs)
+        tmp = "uisim-sched-tmp"
+        servers = await pg.evaluate("fetch('/api/servers').then(r=>r.json()).then(d=>(d.items||[]).map(s=>s.name))")
+        srv = (servers or [""])[-1]
+        await pg.evaluate(
+            "(a) => fetch('/api/schedules', {method:'POST', headers:{'Content-Type':'application/json'},"
+            " body: JSON.stringify({name:a.n, job_type:'export', cron_expr:'0 3 1 1 *', mode:'api',"
+            " days:7, server:a.s, enabled:false})})", {"n": tmp, "s": srv})
+        try:
+            await pg.goto(f"{BASE}/schedules", wait_until="networkidle")
+            await pg.wait_for_timeout(1500)
+            await pg.evaluate(f"editSchedule('{tmp}')")
+            await pg.wait_for_timeout(2500)
+            await pg.fill("#sched-days", "9")
+            await pg.click("#sched-submit-btn")        # the real Save button, a real click
+            await pg.wait_for_timeout(1500)
+            saved = await pg.evaluate(
+                "(n) => fetch('/api/schedules').then(r=>r.json()).then(d=>(d.items||[]).find(s=>s.name===n))", tmp)
+            cfg = (saved or {}).get("config") or {}
+            check("editing a disabled schedule keeps it disabled and keeps its server",
+                  bool(saved) and saved.get("enabled") is False and cfg.get("server") == srv
+                  and int(cfg.get("days") or 0) == 9,
+                  f"enabled={(saved or {}).get('enabled')} server={cfg.get('server')!r} days={cfg.get('days')}")
+        finally:
+            await pg.evaluate("(n) => fetch('/api/schedules/' + n, {method:'DELETE'})", tmp)
+        check("no JS errors in the schedule edit flow", len(errs) == n4, "; ".join(errs[n4:])[:200])
 
         check("no JS errors during record-search flow", len(errs) == n0,
               "; ".join(errs[n0:][:2]))

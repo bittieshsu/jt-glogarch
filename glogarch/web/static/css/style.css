@@ -2003,3 +2003,9 @@ mark.hl {
     color: var(--text-muted); overflow-wrap: anywhere;
 }
 #alog-pagination { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+/* Live job state inside the cancel confirmation */
+.cancel-live { width: 100%; margin: 8px 0 10px; font-size: 0.9em; background: transparent; border: none; }
+.cancel-live td { padding: 2px 12px 2px 0; border: none; vertical-align: top; }
+.cancel-live td:first-child { color: var(--text-muted); white-space: nowrap; }
+.cancel-live-warn { margin-top: 6px; }

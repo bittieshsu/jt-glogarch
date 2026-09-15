@@ -728,6 +728,29 @@ failure.
       dashboard) on log4, render pages to PNG and read cover, TOC, table notes,
       header/footer and watermark — no Chinese fallback, no tofu.
 
+### Job lists stay current; Cancel uses live state (v1.15.1)
+
+- [ ] **Ended jobs cannot be cancelled** (`tests/test_job_cancel_stale_view.py`):
+      completed / failed / cancelled → 409 with the real status, status unchanged,
+      no cancel flag; running job still cancels; unknown id → 404, no flag.
+- [ ] **Lists refresh themselves** (`ui-sim-test.py` step 7, routed `/api/jobs`):
+      the Task Log changes on its own when a job's state changes.
+- [ ] **Stale Cancel is explained, not sent** (same step): clicking Cancel on a
+      row that still says running while the server says ended shows "already
+      ended" and makes no cancel request.
+- [ ] Manually: open the Task Log as two different accounts in two browsers,
+      cancel a throwaway export in one — the other shows it cancelled within ~5 s
+      without reloading.
+- [ ] **Multi-admin guards** (`tests/test_multi_admin_guards.py`): schedule edit
+      keeps `enabled` and `server`; Run now (export) 409 while that server
+      exports, no row, no last-run move; Run now (cleanup/verify) returns at once
+      on a long-lived loop, uses the SCHEDULE's retention, second run 409; stale
+      audit toggle 409 and unchanged; server used by a schedule/report cannot be
+      deleted; archive being imported cannot be deleted; index set being imported
+      into cannot be cleared; scheduled exports publish live progress.
+- [ ] **Schedule edit through the real dialog** (`ui-sim-test.py` step 8):
+      a disabled throwaway schedule stays disabled and keeps its server.
+
 ### Test Results
 
 - [ ] `./scripts/run-tests.sh` passes — `TEST-RESULTS.md` generated

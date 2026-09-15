@@ -2,6 +2,115 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.15.1] - 2026-09-15
+
+### Fixed
+
+- **Administrators saw different states for the same job — and cancelled work in
+  progress.** A customer reported that one account saw a backup job "archiving"
+  while another saw it stopped. The Task Log and the dashboard's Recent Jobs were
+  rendered once, when the page was opened, so each administrator was looking at
+  the moment THEY loaded it. A healthy job's counter stood still on screen and
+  read as a hang, and a job that had already ended still offered Cancel. Both
+  lists now refresh themselves every 5 seconds while the tab is visible (never
+  underneath an open confirmation, and keeping the column you sorted by).
+- **Cancel confirms against the job as it is now, not the row you clicked.** The
+  confirmation first reads the job from the server and shows its live state —
+  progress, records, start time, elapsed, and whether it is paused on purpose
+  because the source is under load — and says plainly that cancelling stops it
+  for every administrator. If the job has already ended, nothing is sent: the
+  page says it was out of date and refreshes.
+- **The server refuses to cancel a job that has ended.** `POST
+  /api/jobs/{id}/cancel` used to set the cancel flags first and check afterwards,
+  so a click from a stale page was still recorded as a cancellation. It now
+  answers 409 with the job's real status before touching anything — also for a
+  run that only ever existed in memory — and an unknown job id leaves no flag.
+  The import dialog's Cancel handles that answer instead of sitting on
+  "Cancelling…".
+
+A review of every place with the same shape — an action that depends on state the
+page shows, or a server that trusts the client — found more:
+
+- **Editing a schedule switched it back on and forgot its server.** The edit
+  form has no enabled switch, and the server defaulted `enabled` to true, so an
+  administrator who changed the days of a schedule another administrator had
+  disabled for maintenance re-enabled it. The server field the form offers was
+  never stored at all: every export schedule created in the UI ran against the
+  default server. Saving now merges onto the stored schedule — what the form does
+  not send is kept — stores the server, and refuses an unknown one. Existing
+  schedules are unchanged.
+- **"Run now" on a cleanup schedule used config.yaml's retention, not the
+  schedule's.** The nightly run honours the retention the schedule shows; Run now
+  did not, so on a site where the schedule keeps longer than config.yaml says, a
+  click could delete archives the schedule was keeping. Run now for cleanup and
+  verify now goes through the scheduler's own handler: the schedule's retention,
+  the same "already running" guard, the same job row.
+- **"Run now" for cleanup/verify froze the whole web service.** They ran on the
+  event loop every page, API call and the audit syslog listener share; a 3½-hour
+  verify made jt-glogarch unresponsive for every administrator for that long.
+  They now run in the background and the page follows them in Task Log.
+- **"Run now" on an export schedule while that server's export was running**
+  said "started", failed on the lock in the background, left no job row, and still
+  moved the schedule's last run. It is now refused with 409 like
+  `/api/export` already was; a run that fails before starting leaves a failed
+  row, and last run only moves when the export really started.
+- **Operation Audit's Enable/Disable flipped whatever the state was.** A second
+  administrator's stale Disable button switched auditing back on. The page now
+  sends the state it asks for; if that is already the state, nothing changes and
+  the page says someone else changed it.
+- **Destructive actions now check what is running:** deleting an archive another
+  administrator is importing, and clearing the target index set an import is
+  writing into, are refused (409); deleting a Graylog server that schedules or
+  reports still use is refused and names them — an unknown server name falls back
+  to the first server, which would archive a different Graylog under their names.
+- **A scheduled export that paused for source load showed nothing.** The
+  "Paused — source Graylog under load" label and the current index only appeared
+  for exports started by hand; the scheduler passed no progress callback, so a
+  throttled nightly run looked like a hang in Task Log and the sidebar. Scheduled
+  exports now publish the same live progress (the callback never raises, so it
+  cannot change how a run behaves).
+
+### Known, not changed in this release
+
+- Settings, notification, report and import-default forms are still
+  last-writer-wins: an administrator saving a form opened earlier overwrites a
+  change another administrator made meanwhile.
+- Rescan can race a running export and reads each unregistered archive whole.
+- The Reports page does not refresh itself.
+- A backpressure pause longer than `export.health_max_pause_min` (30 minutes)
+  stops the export. On a site whose Graylog heap stays above the soft limit,
+  a long backlog stops again and again and rescans the same index each time.
+
+### Upgrade
+
+- No configuration or database change. Sites on 1.14.6 or earlier should
+  upgrade: the stale view and the unconditional cancel both apply there.
+
+### Tests
+
+- `tests/test_job_cancel_stale_view.py`: an ended job (completed / failed /
+  cancelled) is refused with 409 and keeps its status and no flag; a running job
+  still cancels; an unknown id is 404 without a flag; both job lists poll, and
+  Cancel reads the live job before confirming and explains a 409.
+- `ui-sim-test.py` step 7 routes `/api/jobs` to simulated answers: the Task Log
+  must change on its own when the job's state changes, and Cancel on a stale row
+  must show "already ended" and send no cancel request. Step 8 edits a throwaway
+  disabled schedule through the real dialog and requires it to stay disabled with
+  its server.
+- `tests/test_multi_admin_guards.py` (11): schedule edit keeps enabled/server,
+  unknown server refused, cleared keep_indices really cleared; Run now export
+  refused while running with no row and no last-run move; Run now cleanup returns
+  at once on a long-lived loop, uses the schedule's retention and refuses a second
+  run; stale audit toggle changes nothing; server in use cannot be deleted;
+  archive being imported cannot be deleted; index set being imported into cannot
+  be cleared; ended in-memory job cannot be cancelled; scheduled exports publish
+  live progress.
+- Verified for real on staging with three logged-in sessions and a real
+  OpenSearch-direct export: a never-reloaded Task Log followed the job to
+  running and to cancelled, the Cancel dialog showed live state, a stale tab's
+  Cancel was explained and sent nothing, the server answered 409, only whole-hour
+  archives were recorded, and the audit log holds exactly one cancellation.
+
 ## [1.15.0] - 2026-09-14
 
 ### Added

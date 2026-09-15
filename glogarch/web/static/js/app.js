@@ -432,9 +432,16 @@ async function loadDashboard() {
         console.error('Failed to load servers:', e);
     }
 
+    await loadRecentJobs();
+}
+
+// Dashboard "Recent Jobs" — its own loader so it can refresh on a timer
+// without re-running the whole dashboard (servers, stats, sizing).
+async function loadRecentJobs() {
     try {
         const jobs = await fetchJSON(`${API}/jobs?limit=5`);
         const tbody = document.querySelector('#recent-jobs-table tbody');
+        if (!tbody || !jobs.items) return;
         tbody.innerHTML = jobs.items.map(j => {
             const srcParts = (j.source || '').split(':');
             const st = srcParts[0] || '', sm = srcParts[1] || '';
@@ -1739,7 +1746,14 @@ function cancelActiveImport() {
             const cancelBtn = document.getElementById('import-cancel-btn');
             if (cancelBtn) { cancelBtn.disabled = true; cancelBtn.style.opacity = '0.5'; }
             try {
-                await fetchJSON(`${API}/jobs/${_activeImportJobId}/cancel`, {method: 'POST'});
+                const r = await fetchJSON(`${API}/jobs/${_activeImportJobId}/cancel`, {method: 'POST'});
+                if (r && r.error) {
+                    // e.g. 409: the import had already ended — don't sit on "Cancelling…"
+                    if (resultEl) resultEl.innerHTML = '';
+                    if (cancelBtn) { cancelBtn.disabled = false; cancelBtn.style.opacity = '1'; }
+                    if (JOB_ENDED_STATUSES.includes(r.status)) _showJobAlreadyEnded(r.status);
+                    else showAlert(esc(r.error));
+                }
             } catch (e) {
                 showAlert(t('error') + ': ' + (e && e.message ? e.message : e));
                 if (cancelBtn) { cancelBtn.disabled = false; cancelBtn.style.opacity = '1'; }
@@ -2929,6 +2943,9 @@ async function loadJobs() {
     if (!tbody) return;
     const data = await fetchJSON(`${API}/jobs?limit=100`);
     if (!data.items) return;
+    // This runs on a timer now, so keep whatever column the operator sorted by.
+    const sortedTh = document.querySelector('#jobs-table thead th.sort-asc, #jobs-table thead th.sort-desc');
+    const sortDesc = !!(sortedTh && sortedTh.classList.contains('sort-desc'));
     tbody.innerHTML = data.items.map(j => {
         const isRunning = j.status === 'running' || j.status === 'pending';
         const cancelBtn = isRunning
@@ -2982,14 +2999,82 @@ async function loadJobs() {
         </tr>`;
     }).join('');
     applyI18n();
+    if (sortedTh) {
+        // sortTable() flips the direction it finds, so set the opposite first.
+        sortedTh.classList.remove('sort-asc', 'sort-desc');
+        if (sortDesc) sortedTh.classList.add('sort-asc');
+        sortTable(sortedTh);
+    }
 }
 
-function cancelJob(jobId) {
+// Job lists refresh themselves. The Task Log and the dashboard's
+// Recent Jobs used to be rendered ONCE, when the page was opened: each
+// administrator saw the state of the moment THEY loaded it, so one saw a job
+// "running" while another saw it stopped, and a healthy job's frozen counter
+// read as a hang — which is how admins ended up cancelling each other's work.
+let _jobsPollTimer = null;
+function startJobsPoll(refresh) {
+    if (_jobsPollTimer) clearInterval(_jobsPollTimer);
+    const tick = () => {
+        if (document.visibilityState !== 'visible') return;
+        // never redraw underneath an open confirmation (e.g. Cancel)
+        const confirm = document.getElementById('global-confirm-modal');
+        if (confirm && confirm.style.display === 'flex') return;
+        refresh();
+    };
+    _jobsPollTimer = setInterval(tick, 5000);
+    document.addEventListener('visibilitychange', tick);
+}
+
+const JOB_ENDED_STATUSES = ['completed', 'failed', 'cancelled'];
+
+function jobStatusText(status) {
+    const key = 'job_st_' + status;
+    const v = t(key);
+    return v === key ? status : v;
+}
+
+function _showJobAlreadyEnded(status) {
+    showConfirm(`${icon('check')} ${esc(t('job_not_running_title'))}`,
+        esc(t('job_not_running_msg').replace('{status}', jobStatusText(status))), null);
+    loadJobs();
+}
+
+async function cancelJob(jobId) {
+    // The row that was clicked may be minutes or hours old, and another
+    // administrator may have acted since. Read the job's state NOW and confirm
+    // against that — never against the snapshot on this screen.
+    const j = await fetchJSON(`${API}/jobs/${encodeURIComponent(jobId)}`);
+    if (!j || j.error || !j.status) {
+        showAlert(esc((j && j.error) || t('unknown_error')));
+        return;
+    }
+    if (JOB_ENDED_STATUSES.includes(j.status)) {
+        _showJobAlreadyEnded(j.status);
+        return;
+    }
+    const rows = [
+        [t('th_type'), esc(j.job_type || '') + (j.source ? ' · ' + esc(j.source) : '')],
+        [t('th_status'), esc(jobStatusText(j.status))],
+        [t('th_progress'), `${Number(j.progress_pct || 0).toFixed(0)}%`],
+        [t('th_messages'), formatRecords(j.messages_done, j.messages_total, j.job_type)],
+        [t('th_started'), esc(formatDT(j.started_at))],
+        [t('th_elapsed'), esc(formatElapsed(j.started_at))],
+    ];
+    const paused = jobPausedLabel(j);
+    if (paused) rows.push(['⏸', esc(paused)]);
+    if (j.current_detail) rows.push(['', esc(j.current_detail)]);
+    const table = `<table class="cancel-live">${rows.map(([k, v]) =>
+        `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('')}</table>`;
     showConfirm(
-        `${icon('trash')} ${t('confirm_cancel_job')}`,
-        t('cancel_job_desc'),
+        `${icon('trash')} ${esc(t('cancel_live_title'))}`,
+        `<span>${esc(t('cancel_live_state'))}</span>${table}<span class="cancel-live-warn">${esc(t('cancel_live_warn'))}</span>`,
         async () => {
-            await fetchJSON(`${API}/jobs/${jobId}/cancel`, {method: 'POST'});
+            const r = await fetchJSON(`${API}/jobs/${encodeURIComponent(jobId)}/cancel`, {method: 'POST'});
+            if (r && r.error && JOB_ENDED_STATUSES.includes(r.status)) {
+                _showJobAlreadyEnded(r.status);
+                return;
+            }
             loadJobs();
         }
     );
@@ -3377,9 +3462,14 @@ async function runScheduleNow(name) {
     await withButton(event.target.closest('button'), async () => {
         const result = await fetchJSON(`${API}/schedules/${name}/run`, {method: 'POST'});
         if (result.error) {
-            showAlert(result.error);
+            // e.g. 409: an export of this server is already running
+            showAlert(esc(result.error));
         } else if (result.job_id) {
             showAlert(`${t('btn_run_now')}: ${result.job_id.substring(0, 8)}`);
+            setTimeout(() => loadSchedules(), 1000);
+        } else if (result.status === 'started') {
+            // cleanup / verify now run in the background — follow it in Task Log
+            showAlert(`${esc(t('btn_run_now'))}: ${esc(t('job_running'))}`);
             setTimeout(() => loadSchedules(), 1000);
         } else if (result.status === 'completed') {
             // Cleanup/Verify completed synchronously
@@ -4139,11 +4229,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(() => { initCustomSelects(); initTooltips(); initTableSort(); checkRunningJobs(); }, 100);
 
     const path = window.location.pathname;
-    if (path === '/' || path === '') { loadDashboard(); loadOpenSearchStatus(); loadNotifyStatus(); }
+    if (path === '/' || path === '') { loadDashboard(); loadOpenSearchStatus(); loadNotifyStatus(); startJobsPoll(loadRecentJobs); }
     else if (path === '/archives') { initColumnSettings(); loadArchives(); loadArchivePath(); }
     else if (path === '/export') { loadExportPage().then(() => setTimeout(initCustomSelects, 200)); }
     else if (path === '/import') { window.location.href = '/archives'; return; }
-    else if (path === '/jobs') loadTable('#jobs-table', loadJobs);
+    else if (path === '/jobs') { loadTable('#jobs-table', loadJobs); startJobsPoll(loadJobs); }
     else if (path === '/schedules') {
         // Render the schedule table immediately (it is a fast DB-only read) with
         // a loading spinner. Do NOT block it on /api/servers, which runs live
@@ -4157,7 +4247,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     else if (path === '/notify-settings') loadNotifySettings();
     else if (path === '/logs') { loadRealtimeLog(); loadTable('#audit-table', loadAuditLog); }
-    else if (path === '/op-audit') { loadAuditData(1); loadAuditStatus(); loadAuditNginxConfig(); }
+    else if (path === '/op-audit') { loadAuditData(1); loadAuditStatus(); loadAuditNginxConfig(); startJobsPoll(loadAuditStatus); }
     else if (path === '/settings') loadSettingsPage();
     else if (path === '/reports') loadReportsPage();
 });
@@ -4279,6 +4369,7 @@ async function loadAuditStatus() {
         const last = document.getElementById('audit-last-received');
         const btn = document.getElementById('audit-toggle-btn');
         if (btn) {
+            btn.dataset.enabled = st.enabled ? '1' : '0';
             if (st.enabled) {
                 btn.className = 'btn-sm btn-danger';
                 btn.innerHTML = `${icon('pause',14)} ${t('btn_disable')}`;
@@ -4316,7 +4407,14 @@ async function toggleAuditEnabled() {
     const btn = document.getElementById('audit-toggle-btn');
     if (btn) btn.disabled = true;
     try {
-        await fetchJSON(`${API}/audit/toggle`, {method: 'POST'});
+        // Ask for the state this button offers, not "flip it": another admin may
+        // have changed it since this page last read it.
+        const want = !(btn && btn.dataset.enabled === '1');
+        const r = await fetchJSON(`${API}/audit/toggle`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({enabled: want}),
+        });
+        if (r && r.code === 'already_in_state') showAlert(esc(t('audit_toggle_stale')));
         await loadAuditStatus();
     } finally {
         if (btn) btn.disabled = false;
