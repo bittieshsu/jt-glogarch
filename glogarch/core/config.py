@@ -49,6 +49,28 @@ class ExportConfig(BaseModel):
     jvm_memory_threshold_pct: float = 75.0  # soft: pause when sustained above this %
     jvm_memory_hard_pct: float = 90.0       # hard: pause immediately at/above this %
     health_heap_sustained_samples: int = 2  # consecutive soft-over reads before pausing
+    # How heap pressure is judged. "auto": from Graylog's garbage-collector
+    # metrics whenever it exposes them — heap still in use right after a
+    # collection >= jvm_memory_hard_pct, any full GC, or GC time sustained
+    # >= health_gc_overhead_pct of wall time (the soft used% tier is then not
+    # used: used/max counts garbage, and a healthy JVM swings 75-95%). Falls
+    # back to "used" when the metrics are missing. "used": always the raw
+    # used/max two-tier check above.
+    health_heap_signal: str = "auto"
+    health_gc_overhead_pct: float = 10.0    # GC pause time % of wall time (sustained)
+    # Graylog 7 keeps every search's full result in memory for 5 minutes after
+    # it was last read, and only drops expired ones when a LATER search runs.
+    # An API export therefore holds Graylog heap in proportion to its own
+    # speed, and a pause that stops searching can never let that heap go.
+    #   * pacing (API export): slow down page by page as Graylog's heap after
+    #     GC rises past health_pace_start_pct, up to health_pace_max_delay_sec
+    #     per page at jvm_memory_hard_pct — a steady sustainable rate instead
+    #     of running into full GCs and stopping.
+    #   * while a heap-bound pause lasts longer than this, send a few 1-message
+    #     searches every minute so Graylog drops the expired results (0 = off).
+    health_pace_start_pct: float = 70.0
+    health_pace_max_delay_sec: float = 5.0
+    health_search_cache_flush_sec: int = 310
     # --- Adaptive backpressure guard (applies to BOTH API and OpenSearch export) ---
     # Pause the export whenever Graylog is falling behind on ingestion — JVM heap
     # high, or the disk journal / process-output-input buffers keep climbing — and

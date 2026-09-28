@@ -83,6 +83,13 @@ export:
   jvm_memory_threshold_pct: 75.0        # heap SOFT tier: pause when SUSTAINED above this %
   jvm_memory_hard_pct: 90.0             # heap HARD tier: pause immediately at/above this %
   health_heap_sustained_samples: 2      # consecutive soft-over reads before pausing
+  health_heap_signal: auto              # auto = judge heap from Graylog's GC metrics when it exposes them
+                                        # (see "Heap pressure on Graylog 7" below); used = raw used % always
+  health_gc_overhead_pct: 10.0          # GC metrics: pause when GC time is >= this % of wall time (sustained)
+  health_pace_start_pct: 70.0           # API export: start slowing down at this % of heap after GC
+  health_pace_max_delay_sec: 5.0        # API export: wait this long per page at jvm_memory_hard_pct
+  health_search_cache_flush_sec: 310    # heap-bound pause longer than this: send 1-message searches each
+                                        # minute so Graylog drops expired search results (0 = off)
   health_guard_enabled: true            # Master switch for the guard
   health_sample_interval_sec: 15        # FIXED wall-clock sampling cadence (not per-chunk!)
   health_rise_samples: 3                # Consecutive climbs before a signal is "rising"
@@ -116,13 +123,14 @@ Signals and what makes each PAUSE the export:
 
 | Signal | Pauses when | Threshold (default) |
 |---|---|---|
-| JVM heap % (hard) | a single reading is `>=` the hard tier | `jvm_memory_hard_pct: 90` |
-| JVM heap % (soft) | **sustained** `>=` the soft tier for N reads | `jvm_memory_threshold_pct: 75` + `health_heap_sustained_samples: 2` |
+| JVM heap from GC metrics (default when Graylog exposes them) | heap still `>=` the hard tier right after a collection; any full GC since the last reading; GC time `>=` N % of wall time, sustained | `jvm_memory_hard_pct: 90`, `health_gc_overhead_pct: 10` + `health_heap_sustained_samples: 2` |
+| JVM heap % (hard) — no GC metrics, or `health_heap_signal: used` | a single reading is `>=` the hard tier | `jvm_memory_hard_pct: 90` |
+| JVM heap % (soft) — same | **sustained** `>=` the soft tier for N reads | `jvm_memory_threshold_pct: 75` + `health_heap_sustained_samples: 2` |
 | disk journal (uncommitted entries) | it keeps **rising** | `health_rise_samples: 3` + `health_journal_min_delta: 200` |
 | input / process / output buffers | any keeps **rising** | `health_rise_samples: 3` + `health_buffer_min_delta: 64` |
 | Graylog unreachable | immediately (**fail-safe**) | — |
 
-- **Two-tier heap:** the soft tier (75 %) backs off well before the ceiling, but
+- **Two-tier heap** (raw used %, when GC metrics are unavailable): the soft tier (75 %) backs off well before the ceiling, but
   only when heap stays high for `health_heap_sustained_samples` reads so a single
   GC-sawtooth peak doesn't cause a needless pause; the hard tier (90 %) pauses on
   one reading to catch an acute spike. Reaction: soft ≈ 2×15 s = 30 s, hard ≤ 15 s.
@@ -145,6 +153,36 @@ Signals and what makes each PAUSE the export:
 
 Every pause is written to the system log and shown on the running job with the
 exact signal(s) that triggered it.
+
+#### Heap pressure on Graylog 7: GC metrics, pacing and cached search results
+
+- **GC metrics, not used/max.** With `health_heap_signal: auto` (default) the heap is judged from
+  Graylog's own garbage-collector metrics (the `jvm.*` set; G1, Parallel and Serial names are
+  recognised). Used/max counts garbage the next young collection frees: a healthy 3 GB Graylog
+  swings between 75 % and 95 % with no export running, so that check paused a nightly API export
+  for over half its run. Without GC metrics the used % two-tier check above applies.
+- **Why an API export fills Graylog's heap.** Graylog 7 keeps every search's complete result in
+  memory for 5 minutes after it was last read (at most 1,000 searches). The heap an API export
+  holds is roughly its own rate over the last 5 minutes — measured ≈ 10 KB of Graylog heap per
+  exported message on a site with ≈ 2.4 KB messages, i.e. a 3 GB Graylog reached 90 % after GC at
+  ≈ 760 messages/s.
+- **Pacing (API export only).** Above `health_pace_start_pct` of heap after GC the export waits
+  between pages, rising linearly to `health_pace_max_delay_sec` at `jvm_memory_hard_pct`, so it
+  settles at the rate that Graylog can hold instead of running into full GCs. The log shows
+  `export pacing adjusted` whenever the delay changes. OpenSearch-direct does not search Graylog
+  and is never paced.
+- **A pause cannot release that heap on its own.** Graylog drops expired results only while it
+  serves another search. Once an export pauses nothing searches, so the heap it left behind stays:
+  on a real site it sat at 90–91 % after GC through whole 30-minute pauses (the collector ran
+  dozens of cycles and found it all in use), then fell to 74 % within five minutes of four small
+  searches. So a heap-bound pause that lasts longer than `health_search_cache_flush_sec` (310 s,
+  just past the 5-minute expiry) sends a few 1-message searches each minute and logs
+  `asked Graylog to release expired search results`. Journal/buffer pauses never send them.
+- **The API-mode ceiling is Graylog's per-search cost.** Every Graylog 7 search also reads the
+  field types of every index it covers, whatever the page size: ≈ 550 ms per request on a site
+  with 119 indices / 150,000 fields vs ≈ 40 ms on a small one. At 1,000 messages per page that
+  caps API mode near 890 messages/s. Fewer retained indices or fewer distinct fields make every
+  Graylog search faster, not just the export.
 
 ---
 
@@ -319,6 +357,7 @@ op_audit:
 ```
 
 > Audit records are cleaned automatically when the scheduled cleanup runs, using the same `retention.retention_days` as archive files. No separate retention setting needed.
+
 
 ### How it works
 

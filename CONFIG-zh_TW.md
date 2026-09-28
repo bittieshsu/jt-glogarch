@@ -82,6 +82,13 @@ export:
   jvm_memory_threshold_pct: 75.0        # heap 軟門檻：持續高於此 % 才暫停
   jvm_memory_hard_pct: 90.0             # heap 硬上限：單次 >= 此 % 立即暫停
   health_heap_sustained_samples: 2      # 軟門檻連續超過幾次才暫停
+  health_heap_signal: auto              # auto＝Graylog 有提供 GC 指標時改用 GC 指標判斷 heap
+                                        # （見下方「Graylog 7 的 heap 壓力」）；used＝一律用原始使用率
+  health_gc_overhead_pct: 10.0          # GC 指標：GC 時間持續 >= 總時間的此 % 即暫停
+  health_pace_start_pct: 70.0           # API 匯出：GC 後 heap 超過此 % 開始放慢
+  health_pace_max_delay_sec: 5.0        # API 匯出：GC 後 heap 到硬上限時，每頁等待秒數
+  health_search_cache_flush_sec: 310    # 因 heap 暫停超過此秒數：每分鐘送幾次只抓 1 筆的搜尋，
+                                        # 讓 Graylog 清掉過期的搜尋結果（0＝關閉）
   health_guard_enabled: true            # 守護總開關
   health_sample_interval_sec: 15        # 固定取樣節奏（秒）——非每個 chunk！
   health_rise_samples: 3                # 連續成長幾次才算「持續上升」
@@ -112,13 +119,14 @@ export:
 
 | 訊號 | 暫停條件 | 預設門檻 |
 |---|---|---|
-| JVM heap %（硬） | 單次讀到 `>=` 硬上限 | `jvm_memory_hard_pct: 90` |
-| JVM heap %（軟） | **持續** N 次 `>=` 軟門檻 | `jvm_memory_threshold_pct: 75` + `health_heap_sustained_samples: 2` |
+| JVM heap（GC 指標，Graylog 有提供時的預設） | GC 剛結束 heap 仍 `>=` 硬上限；距上次讀取發生過 Full GC；GC 時間持續 `>=` 總時間的 N% | `jvm_memory_hard_pct: 90`、`health_gc_overhead_pct: 10` + `health_heap_sustained_samples: 2` |
+| JVM heap %（硬）：無 GC 指標或設為 `health_heap_signal: used` | 單次讀到 `>=` 硬上限 | `jvm_memory_hard_pct: 90` |
+| JVM heap %（軟）：同上 | **持續** N 次 `>=` 軟門檻 | `jvm_memory_threshold_pct: 75` + `health_heap_sustained_samples: 2` |
 | disk journal（未提交筆數） | **持續上升** | `health_rise_samples: 3` + `health_journal_min_delta: 200` |
 | input／process／output buffer | 任一**持續上升** | `health_rise_samples: 3` + `health_buffer_min_delta: 64` |
 | 讀不到 Graylog | 立即暫停（**fail-safe**） | — |
 
-- **兩段式 heap**：軟門檻（75%）遠早於天花板就退載，但要連續 `health_heap_sustained_samples`
+- **兩段式 heap**（原始使用率，沒有 GC 指標時）：軟門檻（75%）遠早於天花板就退載，但要連續 `health_heap_sustained_samples`
   次都偏高才暫停，避免單一 GC 鋸齒尖峰誤觸；硬上限（90%）單次就暫停以抓突發飆高。
   反應：軟 ≈ 2×15 秒 = 30 秒、硬 ≤ 15 秒。
 - **「持續上升」**＝ `health_rise_samples + 1` = **4 次連續讀數**（15 秒節奏下約 60 秒），
@@ -129,9 +137,34 @@ export:
   暫停期間峰值 × `health_resume_drain_ratio`（0.7 → 從峰值退 ≥ 30%）以下。也就是必須真的
   降下來，不是只停止上升。
 - **放棄**：高負載持續 `health_max_pause_min`（30 分鐘）未降，匯出即以錯誤停止並發通知。
-- **斷路器**：`connection_failure_limit`（20）次連續連線失敗即中止，不再對死掉的伺服器猛打。
+- **斷路器**：`connection_failure_limit`（10）次連續連線失敗即中止，不再對死掉的伺服器猛打。
 - **fail-safe**：讀不到 Graylog（正是它可能出狀況的當下）視為有壓力並暫停，**不會**把
   「讀不到」當成健康。
+
+#### Graylog 7 的 heap 壓力：GC 指標、控速與暫存的搜尋結果
+
+- **看 GC 指標，不看使用率**：`health_heap_signal: auto`（預設）用 Graylog 自己的 GC 指標判斷
+  heap（`jvm.*` 指標；可辨識 G1、Parallel、Serial）。使用率會把下一次 young GC 就會回收的垃圾
+  也算進去：健康的 3 GB Graylog 沒有匯出時也會在 75%～95% 之間來回，所以舊的判斷讓每晚的
+  API 匯出暫停了一半以上的時間。沒有 GC 指標時，沿用上方的兩段式使用率判斷。
+- **API 匯出為什麼會把 Graylog 的 heap 撐滿**：Graylog 7 會把每次搜尋的完整結果，在最後一次
+  讀取後保留 5 分鐘（最多 1,000 次搜尋）。所以 API 匯出佔用的 heap，大約等於它自己最近 5 分鐘
+  的匯出量。實測在訊息約 2.4 KB 的站台，每匯出 1 筆約佔 Graylog 10 KB heap；3 GB 的 Graylog
+  在每秒約 760 筆時，GC 後 heap 就到 90%。
+- **控速（只有 API 匯出）**：GC 後 heap 超過 `health_pace_start_pct`，匯出就在每頁之間等待，
+  等待時間線性增加，到 `jvm_memory_hard_pct` 時為 `health_pace_max_delay_sec`。匯出速度因此
+  會穩定在這台 Graylog 撐得住的程度，而不是一路衝到 Full GC。延遲改變時，記錄會出現
+  `export pacing adjusted`。OpenSearch 直連不會對 Graylog 搜尋，所以不控速。
+- **光靠暫停放不掉這些 heap**：Graylog 只有在處理下一次搜尋時，才會清掉過期的結果。匯出一暫停
+  就沒人搜尋，留下來的 heap 就一直留著：實際站台在整整 30 分鐘的暫停裡，GC 後 heap 都停在
+  90%～91%（GC 跑了幾十輪，判斷全都還在使用），送出 4 次小搜尋後 5 分鐘內就降到 74%。所以
+  因 heap 暫停超過 `health_search_cache_flush_sec`（310 秒，剛好超過 5 分鐘的保留時間）時，
+  會每分鐘送幾次只抓 1 筆的搜尋，並記錄 `asked Graylog to release expired search results`。
+  因 journal 或 buffer 暫停時不會送。
+- **API 模式的上限在 Graylog 每次搜尋的固定成本**：Graylog 7 每次搜尋都會讀取所涵蓋的每個
+  index 的欄位型別，和每頁筆數無關：119 個 index、15 萬個欄位的站台每次約 550 毫秒，小站台
+  約 40 毫秒。每頁 1,000 筆時，API 模式最多約每秒 890 筆。保留的 index 少一點、不同的欄位少
+  一點，Graylog 所有的搜尋都會變快，不只是匯出。
 
 每次暫停都會寫入系統記錄，並在執行中的作業上顯示是哪個訊號觸發。
 

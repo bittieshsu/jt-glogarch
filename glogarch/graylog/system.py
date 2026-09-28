@@ -4,6 +4,8 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
+
 from glogarch.graylog.client import GraylogClient
 from glogarch.utils.logging import get_logger
 
@@ -53,6 +55,19 @@ class SystemMonitor:
         "org.graylog2.buffers.process.usage",
         "org.graylog2.buffers.output.usage",
     ]
+    # Garbage-collector metrics (the Dropwizard jvm.* set Graylog registers).
+    # Pool and collector names depend on the GC in use, so ask for the common
+    # ones: /metrics/multiple silently omits names that do not exist. The
+    # guard judges heap pressure from these instead of used/max (see
+    # HealthGuard._gc_pressure) and falls back to used/max when none exist.
+    _OLD_POOLS = ("G1-Old-Gen", "PS-Old-Gen", "Tenured-Gen")
+    _FULL_GC = ("G1-Old-Generation", "PS-MarkSweep", "MarkSweepCompact")
+    _OTHER_GC = ("G1-Young-Generation", "G1-Concurrent-GC", "PS-Scavenge", "Copy")
+    _GC_METRICS = (
+        [f"jvm.memory.pools.{p}.{k}" for p in _OLD_POOLS for k in ("used-after-gc", "max")]
+        + [f"jvm.gc.{c}.{k}" for c in _FULL_GC for k in ("count", "time")]
+        + [f"jvm.gc.{c}.time" for c in _OTHER_GC]
+    )
 
     async def get_health(self) -> dict | None:
         """One-shot read of ALL backpressure signals (JVM heap + disk journal +
@@ -64,7 +79,7 @@ class SystemMonitor:
             jvm = await self.client.get("/api/system/jvm")
             resp = await self.client.post(
                 "/api/system/metrics/multiple",
-                json={"metrics": self._HEALTH_METRICS},
+                json={"metrics": self._HEALTH_METRICS + self._GC_METRICS},
                 headers={"X-Requested-By": "jt-glogarch"},
             )
         except Exception as e:
@@ -82,11 +97,64 @@ class SystemMonitor:
             "jvm_pct": (used / max_mem) * 100.0,
             "heap_max_bytes": max_mem,
             "heap_used_bytes": used,
+            **self._gc_signals(m, max_mem),
             "journal_uncommitted": int(m.get("org.graylog2.journal.entries-uncommitted") or 0),
             "journal_size": int(m.get("org.graylog2.journal.size") or 0),
             "buffer_input": int(m.get("org.graylog2.buffers.input.usage") or 0),
             "buffer_process": int(m.get("org.graylog2.buffers.process.usage") or 0),
             "buffer_output": int(m.get("org.graylog2.buffers.output.usage") or 0),
+        }
+
+    async def release_expired_searches(self, count: int = 8) -> int:
+        """Send `count` 1-message searches so Graylog drops expired results.
+
+        Graylog 7 holds each search job — with its full result — in a Guava
+        cache (InMemorySearchJobService: expireAfterAccess 5 min, maximumSize
+        1000). Guava removes expired entries only while serving later cache
+        writes, one segment at a time, so once an export pauses nothing ever
+        releases the results it left behind: log4 sat at 90-91% heap after GC
+        through 30-minute pauses (G1 ran 19 concurrent cycles and found it all
+        live), then went 91% -> 74% within 5 minutes of four such searches.
+        Several searches, because each one only cleans the segment its job
+        lands in. Returns how many were answered."""
+        now = datetime.now(timezone.utc)
+        params = {
+            "query": "*", "limit": 1, "offset": 0, "sort": "timestamp:desc",
+            "from": (now - timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+            "to": now.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        }
+        done = 0
+        for _ in range(max(0, count)):
+            try:
+                await self.client.get("/api/search/universal/absolute", params=params)
+                done += 1
+            except Exception as e:
+                log.warning("Search to release Graylog's expired search results failed",
+                            error=str(e))
+                break
+        return done
+
+    @classmethod
+    def _gc_signals(cls, m: dict, heap_max: int) -> dict:
+        """Cumulative GC counters + old-generation occupancy after the last
+        collection. Each value is None when this Graylog does not expose it."""
+        full = [m[f"jvm.gc.{c}.count"] for c in cls._FULL_GC if f"jvm.gc.{c}.count" in m]
+        times = [m[f"jvm.gc.{c}.time"] for c in cls._FULL_GC + cls._OTHER_GC
+                 if f"jvm.gc.{c}.time" in m]
+        after_pct = None
+        for p in cls._OLD_POOLS:
+            after = m.get(f"jvm.memory.pools.{p}.used-after-gc")
+            if after is None or after < 0:
+                continue
+            pool_max = m.get(f"jvm.memory.pools.{p}.max") or 0
+            denom = pool_max if pool_max > 0 else heap_max
+            if denom > 0:
+                after_pct = after / denom * 100.0
+            break
+        return {
+            "gc_full_count": int(sum(full)) if full else None,
+            "gc_time_ms": int(sum(times)) if full and times else None,
+            "heap_after_gc_pct": after_pct,
         }
 
 

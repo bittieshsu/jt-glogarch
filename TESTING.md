@@ -751,6 +751,29 @@ failure.
 - [ ] **Schedule edit through the real dialog** (`ui-sim-test.py` step 8):
       a disabled throwaway schedule stays disabled and keeps its server.
 
+### Export heap guard on Graylog 7 — GC metrics, pacing, cached search results (v1.16.0)
+
+- [ ] **GC signal** (`tests/test_health_guard_gc.py`): a healthy 80–94 % used %
+      sawtooth with no full GC never pauses on GC metrics (and does pause with
+      `health_heap_signal: used`); a full GC, heap still `>=` the hard limit right
+      after GC, or GC time `>=` `health_gc_overhead_pct` on two readings in a row
+      pauses; a Graylog restart (counters reset) does not; missing GC metrics fall
+      back to used %; journal and buffers are still watched.
+- [ ] **Pacing** (same file): delay per page is 0 at or below
+      `health_pace_start_pct` and rises linearly to `health_pace_max_delay_sec` at
+      `jvm_memory_hard_pct`; never for OpenSearch-direct or without GC metrics; the
+      API exporter calls `guard.pace()` for every page.
+- [ ] **A heap-bound pause releases Graylog's expired search results** after
+      `health_search_cache_flush_sec`, at most once a minute, and resumes once the
+      heap falls; a journal/buffer pause never sends those searches.
+- [ ] **Against a real Graylog — .83, never a production one**: an API export with
+      lowered thresholds logs `export pacing adjusted` with the delay rising as
+      Graylog's heap after GC rises, and a forced heap-bound pause logs
+      `asked Graylog to release expired search results searches=8`.
+- [ ] **One nightly run on staging** with a read-only GC sampler on the source
+      Graylog: total time vs the previous nights, pauses by reason, no
+      "did not drain" stop, full GCs during the run.
+
 ### Test Results
 
 - [ ] `./scripts/run-tests.sh` passes — `TEST-RESULTS.md` generated

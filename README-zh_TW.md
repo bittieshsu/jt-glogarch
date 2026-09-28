@@ -1,4 +1,4 @@
-# jt-glogarch v1.15.1
+# jt-glogarch v1.16.0
 
 **語言**： [English](README.md) | **繁體中文** | [日本語](README-ja.md)  
 **網站**： <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Graylog Open (6.x / 7.x) 的記錄歸檔與還原工具
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.15.1-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.16.0-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open 版本不支援 Enterprise 版的 Archive 功能。
@@ -67,7 +67,7 @@ Graylog Open 版本不支援 Enterprise 版的 Archive 功能。
 | 分頁方式 | 時間視窗（突破 10K offset 限制） | `search_after` （無限制） |
 | 串流篩選 | ✅ 支援 | ❌ 不支援（依 index) |
 | 需要 | Graylog API Token | OpenSearch 帳密 |
-| 記憶體保護 | JVM heap 監控（85% 自動停止） | 不需要 |
+| 記憶體保護 | 依 GC 指標判斷 Graylog heap：自動控速，真的有壓力才暫停 | 不需要 |
 | 適用 | 串流篩選匯出、OpenSearch 鎖定的環境 | 大量歷史匯出、時間敏感任務 |
 | Graylog 7 Data Node | ✅ 支援 | ❌ 不支援（見下方說明） |
 
@@ -194,7 +194,7 @@ Telegram • Discord • Slack • Microsoft Teams • Nextcloud Talk • Email 
 
 - **緊急本機登入** — Graylog 離線時可用 `localadmin` 帳號登入 Web UI（SHA256 hash 密碼，需預先設定。`glogarch hash-password` 產生）
 - **健康檢查端點** — `GET /api/health`（免認證），回傳 DB/磁碟/排程器狀態，可供 Prometheus / Uptime Kuma 監控
-- **JVM 記憶體保護** — Graylog heap > 85% 時自動暫停 API 匯出，GC 回收後自動繼續（5 分鐘未恢復才停止）
+- **Graylog heap 保護**：依 Graylog 的 GC 指標判斷 heap，GC 後 heap 超過 70% 就逐頁放慢 API 匯出，發生 Full GC 或達到 90% 才暫停，壓力解除後自動繼續（30 分鐘仍未解除才停止）
 - **OpenSearch 暫態錯誤自動重試** — 500/502/503/429 自動 backoff retry
 - 同伺服器並行匯出鎖定 + 同歸檔並行匯入鎖定
 - 自動調節速率限制（依 CPU 使用率）
@@ -277,7 +277,7 @@ Telegram • Discord • Slack • Microsoft Teams • Nextcloud Talk • Email 
    - 串流寫入 gzip 檔案（不全量緩衝）
    - 計算 SHA256、寫入 `.sha256` 附檔
    - 寫入 SQLite DB
-3. 定期檢查 Graylog JVM heap；>85% 自動暫停，GC 回收後繼續
+3. 約每 15 秒檢查 Graylog（依 GC 指標判斷 heap、journal、buffer）；GC 後 heap 升高就放慢，真的有壓力才暫停，解除後繼續
 4. 發送結果通知
 
 
@@ -1230,7 +1230,7 @@ jt-glogarch 本身占用不高（穩定約 200 MB——採串流方式讀取歸�
 **用 Graylog API 模式當：**
 - 需要串流層級的篩選
 - OpenSearch 已鎖定（無直接存取權）
-- 想要 JVM 記憶體保護（85% heap 自動停止）
+- 想讓匯出依 Graylog 的 heap 自動調整速度
 
 **用 OpenSearch Direct 模式當：**
 - 需要快速大量匯出歷史資料
@@ -1468,13 +1468,27 @@ print("next fire:", t.get_next_fire_time(None, datetime.now(s.timezone)))
 
 ### API 匯出因 JVM heap 壓力暫停或停止
 
-使用 API 模式時，jt-glogarch 會監控 Graylog 的 JVM heap 使用率。heap 超過閾值（預設 85%）時，匯出會**自動暫停**，最多等待 5 分鐘讓 GC 回收。heap 降回閾值以下就自動繼續。等了 5 分鐘仍未降低才會停止。
+使用 API 模式時，jt-glogarch 約每 15 秒讀取一次來源 Graylog 的狀態。Graylog 7 會把每次搜尋的
+完整結果在記憶體保留 5 分鐘，所以 API 匯出佔用的 Graylog heap，和它自己的匯出速度成正比（實測每匯出
+1 筆約佔 10 KB）。因此保護機制改用 Graylog 的 GC 指標判斷 heap：GC 剛結束時還用了多少、有沒有
+Full GC、GC 花了多少時間，而不是看原始使用率。健康的 JVM 使用率本來就會在 75%～95% 之間來回：
 
-**方案 1 — 降低查詢壓力**（不需重啟 Graylog）：
+- GC 後 heap 超過 **70%**，匯出會**逐頁放慢**（到 90% 時每頁最多等 5 秒），速度會穩定在 Graylog
+  撐得住的程度；
+- 發生 **Full GC**，或 GC 後 heap 達 **90%**，就**暫停**。Graylog 只有在處理下一次搜尋時才會清掉
+  暫存的結果，所以因 heap 暫停超過 5 分鐘時，會送幾次只抓 1 筆的搜尋，heap 才降得下來；
+- 壓力持續 **30 分鐘**（`health_max_pause_min`）仍未解除，匯出就會停止並發出通知。
+
+在 3 GB heap 的 Graylog 7.1 實測：控速後每秒 478 筆，6 小時只有 1 次 Full GC，GC 後 heap 最高 86%；
+舊的使用率判斷平均每秒 330～360 筆，每晚有一半以上的時間在暫停。所有參數見 CONFIG-zh_TW.md 的
+「Graylog 7 的 heap 壓力」。
+
+**方案 1 — 讓 Graylog 的 heap 維持得更低**（不需重啟 Graylog）。API 匯出佔用的 heap 取決於速度，
+控速已經在決定速度；想保留更多餘裕，就讓它更早開始放慢：
 ```yaml
 export:
-  batch_size: 300                        # 預設 1000 — 降低 = 每次查詢佔用更少 heap
-  delay_between_requests_ms: 100         # 預設 5 — 加大 = 給 GC 更多時間回收
+  health_pace_start_pct: 60              # 預設 70：GC 後 heap 到此 % 開始控速
+  health_pace_max_delay_sec: 8           # 預設 5：到 jvm_memory_hard_pct 時每頁的等待秒數
 ```
 
 **方案 2 — 加大 Graylog heap**（伺服器有 ≥16 GB RAM 時建議）：
@@ -1484,7 +1498,7 @@ GRAYLOG_SERVER_JAVA_OPTS="-Xms8g -Xmx8g"
 sudo systemctl restart graylog-server
 ```
 
-8 GB heap 在 85% 閾值下有 ~1.2 GB 餘裕，足夠匯出 + 正常運作。
+匯出能穩定維持的速度隨 Graylog 的 heap 增加：以 5 分鐘的結果暫存來算，每多 1 GB 大約可多承受每秒 350～400 筆，最多到每秒約 890 筆，那是 Graylog 每次搜尋固定成本決定的 API 模式上限。
 
 **方案 3 — 使用 OpenSearch Direct 模式**（大量匯出首選）：
 

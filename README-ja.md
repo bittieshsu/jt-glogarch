@@ -1,4 +1,4 @@
-# jt-glogarch v1.15.1
+# jt-glogarch v1.16.0
 
 **Language**: [English](README.md) | [繁體中文](README-zh_TW.md) | **日本語**  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Graylog Open（6.x / 7.x）向けのログのアーカイブ・リストアツール
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.15.1-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.16.0-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 > **作者：** Jason Cheng（[Jason Tools](https://github.com/jasoncheng7115)）
@@ -114,7 +114,8 @@ v1.14.0 から、アーカイブファイルを **Graylog にインポートし�
 - **中断からの再開** — 完了したチャンク（1 時間単位）は再エクスポートされません。
 - **負荷に応じた自動一時停止** — エクスポートは本番の Graylog / OpenSearch に負荷をかけるため、
   Graylog の JVM ヒープ、ディスクジャーナル、各バッファを定期的に確認し、負荷が高いと一時停止して、
-  回復すると自動的に再開します（API モード・OpenSearch 直接モードの両方）。
+  回復すると自動的に再開します（API モード・OpenSearch 直接モードの両方）。ヒープは GC メトリクスで
+  判断し、API モードでは GC 後のヒープが 70% を超えるとページごとに速度を落とします。
 
 ### 2 つのインポート（リストア）モード
 

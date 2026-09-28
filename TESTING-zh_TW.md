@@ -583,6 +583,23 @@ GL_PASS='<graylog-admin-密碼>' bash scripts/e2e-archive-test.sh
 - [ ] **透過真正的對話框編輯排程**（`ui-sim-test.py` 第 8 步）：停用的測試用排程維持停用並保留
       伺服器。
 
+### Graylog 7 的匯出 heap 保護：GC 指標、控速、暫存的搜尋結果（v1.16.0）
+
+- [ ] **GC 判斷**（`tests/test_health_guard_gc.py`）：健康的 80%～94% 使用率鋸齒、沒有 Full GC
+      時，用 GC 指標不會暫停（設為 `health_heap_signal: used` 時會暫停）；發生 Full GC、GC 剛結束
+      heap 仍 `>=` 硬上限，或連續兩次 GC 時間 `>=` `health_gc_overhead_pct` 時會暫停；Graylog
+      重啟（計數歸零）不會誤觸；沒有 GC 指標時退回使用率判斷；journal 與 buffer 照樣監看。
+- [ ] **控速**（同一個檔案）：GC 後 heap 在 `health_pace_start_pct` 以下時每頁不等待，之後線性增加，
+      到 `jvm_memory_hard_pct` 時為 `health_pace_max_delay_sec`；OpenSearch 直連或沒有 GC 指標時
+      一律不控速；API 匯出每一頁都會呼叫 `guard.pace()`。
+- [ ] **因 heap 暫停時會讓 Graylog 釋放過期的搜尋結果**：超過 `health_search_cache_flush_sec` 才送，
+      每分鐘最多一次，heap 降下來就恢復；因 journal／buffer 暫停時不送。
+- [ ] **對真的 Graylog 測試（.83，絕不用正式環境）**：調低門檻做一次 API 匯出，記錄出現
+      `export pacing adjusted`，延遲隨 Graylog 的 GC 後 heap 上升而增加；強制一次因 heap 暫停，
+      記錄出現 `asked Graylog to release expired search results searches=8`。
+- [ ] **在 staging 實跑一晚**，同時對來源 Graylog 做唯讀 GC 取樣：總耗時和前幾晚比較、各原因的
+      暫停次數、沒有因「did not drain」停止、執行期間的 Full GC 次數。
+
 ### 測試結果
 
 - [ ] `./scripts/run-tests.sh` 通過 — `TEST-RESULTS.md` 已產生

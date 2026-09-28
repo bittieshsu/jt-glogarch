@@ -295,7 +295,8 @@ class Exporter:
                 # ingestion falls behind (heap high, or journal/buffers climbing)
                 # and resumes once it drains. Fail-safe if Graylog is unreachable.
                 guard = HealthGuard(monitor, self.export_config, progress_callback,
-                                    cancel_check=lambda: self._cancelled)
+                                    cancel_check=lambda: self._cancelled,
+                                    pace_searches=True)
                 search = GraylogSearch(
                     client, monitor,
                     delay_between_requests_ms=self.export_config.delay_between_requests_ms,
@@ -684,6 +685,7 @@ class Exporter:
                         "messages_done": result.messages_total,
                         "messages_total": total_records,
                     })
+                    await guard.pace()
 
                 try:
                     writer.write_batch(batch)

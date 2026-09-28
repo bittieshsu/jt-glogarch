@@ -2,6 +2,85 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.16.0] - 2026-09-28
+
+### Changed
+
+- **The export's Graylog heap guard reads the garbage collector, not used/max.**
+  Used/max counts garbage the next young collection frees: a healthy 3 GB Graylog
+  swings between 75 % and 95 % with no export running, and a nightly 7.5M-record API
+  export spent 53–57 % of its six hours paused on it. When Graylog exposes its GC
+  metrics (all current versions; G1, Parallel and Serial are recognised) the guard
+  now pauses on heap still `>=` `jvm_memory_hard_pct` right after a collection, on
+  any full GC, or on GC time `>=` `health_gc_overhead_pct` (10 %) of wall time on two
+  readings in a row. Without GC metrics it keeps the old two-tier used % check;
+  `export.health_heap_signal: used` forces that.
+- **API exports pace themselves to what the source Graylog can hold.** Graylog 7
+  keeps every search's full result in memory for 5 minutes after it was last read
+  (at most 1,000 searches), so the heap an API export holds follows its own speed
+  — measured ≈ 10 KB per exported message. Above `health_pace_start_pct` (70 %) of
+  heap after GC the export now waits between pages, rising to
+  `health_pace_max_delay_sec` (5 s) at `jvm_memory_hard_pct`, and logs
+  `export pacing adjusted`. OpenSearch-direct does not search Graylog and is not
+  paced.
+
+### Fixed
+
+- **A heap pause could never end, so the export stopped after 30 minutes.** Graylog
+  drops expired search results only while serving a later search; once an export
+  paused nothing searched, and on a real site the heap stayed at 90–91 % after GC
+  through whole 30-minute pauses (the collector ran dozens of cycles and found it
+  all in use), then fell to 74 % within five minutes of four small searches. A
+  heap-bound pause longer than `health_search_cache_flush_sec` (310 s) now sends a
+  few 1-message searches each minute. Journal and buffer pauses never do.
+- The README heap-guard descriptions still said "pause above 85 %, stop after 5
+  minutes"; they now describe what the guard does. CONFIG-zh_TW gave the
+  connection circuit breaker as 20 failures; the default is 10.
+
+### Measured
+
+- Same staging box, same source (Graylog 7.1.9, 3 GB heap), nightly API export:
+
+  | | 9/23–9/25, used % guard | 9/27, this release |
+  |---|---|---|
+  | records / time | 7.0–7.6M in 5h51m–6h13m | 10.27M in 5h58m |
+  | average rate | 327–360 messages/s | 478 messages/s |
+  | paused | 233–263 times, 3.1–3.4 h | once, 75 s |
+  | full GCs on the source Graylog | not sampled | 1 in 6 h (33 in 6.2 h on 9/26 without pacing) |
+  | heap after GC | not sampled | median 74 %, max 86 % |
+
+- Every Graylog 7 search also reads the field types of every index it covers,
+  whatever the page size: ≈ 550 ms per request on a site with 119 indices and
+  150,000 fields, ≈ 40 ms on a small one. That caps API mode near 890 messages/s at
+  1,000 per page; bigger pages are faster but hold proportionally more Graylog heap
+  (5,000 per page drove a 3 GB Graylog into repeated full GCs and OutOfMemoryError).
+
+### Upgrade
+
+- **Behaviour change for every site:** API exports may now run slower than full
+  speed while the source Graylog's heap after GC is above 70 %, and will pause far
+  less. To keep the old behaviour set `export.health_heap_signal: used`. New keys
+  are optional; no database change.
+
+### Known, not changed in this release
+
+- A single millisecond holding more than 10,000 messages still cannot be paged
+  through Graylog's API (archived up to 10,000, reported, re-run in OpenSearch
+  Direct).
+- The 30-minute backpressure stop, last-writer-wins settings forms, rescan vs a
+  running export, and the Reports page not refreshing are unchanged from 1.15.1.
+
+### Tests
+
+- `tests/test_health_guard_gc.py` (28): a healthy sawtooth never pauses on GC
+  metrics and did pause on used %; full GC, heap after GC, sustained GC time, a
+  Graylog restart, missing metrics; pacing curve, OpenSearch-direct never paced,
+  the API exporter paces every page; a heap-bound pause releases cached searches
+  after 310 s at most once a minute and resumes, a journal pause never does;
+  G1/Parallel metric parsing.
+- Against a real Graylog (.83): an API export logs rising pacing delays as the
+  heap after GC rises; a forced heap pause sends 8 release searches.
+
 ## [1.15.1] - 2026-09-15
 
 ### Fixed

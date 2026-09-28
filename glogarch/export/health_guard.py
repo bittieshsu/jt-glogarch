@@ -11,7 +11,9 @@ This guard samples Graylog's own health signals between chunks/batches and, the
 moment ingestion starts falling behind, PAUSES the export until it drains — then
 resumes. It watches every signal:
 
-  * JVM heap %                         (absolute threshold)
+  * JVM heap                           (GC metrics: heap left after a
+                                        collection, full GCs, GC time share;
+                                        raw used % when those are missing)
   * disk journal uncommitted entries   (sustained rise)
   * input / process / output buffers   (sustained rise)
 
@@ -45,6 +47,12 @@ _BUFFERS = (
 _DRAIN_METRICS = ("journal_uncommitted", "buffer_process", "buffer_output", "buffer_input")
 
 
+def _heap_bound(signals: list[str]) -> bool:
+    """A pause caused by Graylog's heap (not the journal or buffers) — the only
+    kind that releasing Graylog's cached search results can help."""
+    return any("heap" in s or "garbage collection" in s for s in signals)
+
+
 class RisingTracker:
     """Detects a metric that keeps climbing across consecutive samples."""
 
@@ -75,8 +83,13 @@ class HealthGuard:
     """
 
     def __init__(self, monitor, cfg, progress_callback=None, ctx=None,
-                 cancel_check=None):
+                 cancel_check=None, pace_searches=False):
         self.monitor = monitor
+        # True for the API export: its own searches are what fill Graylog's
+        # heap (see ExportConfig.health_pace_start_pct), so slowing them down
+        # is what lets it recover. OpenSearch-direct does not search Graylog.
+        self.pace_searches = pace_searches
+        self.pace_delay = 0.0
         self.cfg = cfg
         self.progress_callback = progress_callback
         # Read on every tick of a backpressure pause. "Paused — source under
@@ -88,6 +101,10 @@ class HealthGuard:
         self.pause_count = 0
         self.total_paused_sec = 0
         self._heap_streak = 0
+        self._gc_streak = 0
+        self._gc_prev: tuple[float, int, int] | None = None
+        self._heap_mode: str | None = None
+        self._clock = time.monotonic
         self._last_sample = 0.0
         self._interval = max(1, getattr(cfg, "health_sample_interval_sec", 15))
         rs = getattr(cfg, "health_rise_samples", 3)
@@ -116,15 +133,18 @@ class HealthGuard:
         if health is None:
             return ["Graylog not responding (pausing to be safe)"]
         out: list[str] = []
-        # Two-tier JVM heap: back off well before the ceiling, but don't let a
-        # single GC-sawtooth peak cause a needless pause.
+        # JVM heap: from the garbage collector's own metrics when Graylog
+        # exposes them (_gc_pressure). Otherwise the two-tier used% check —
+        # back off well before the ceiling without pausing on every GC peak:
         #   * hard tier  → pause immediately on one reading (acute spike)
         #   * soft tier  → pause only when SUSTAINED for N reads (steady climb)
         soft = getattr(self.cfg, "jvm_memory_threshold_pct", 75.0)
         hard = getattr(self.cfg, "jvm_memory_hard_pct", 90.0)
         need = max(1, getattr(self.cfg, "health_heap_sustained_samples", 2))
         hp = health.get("jvm_pct", 0)
-        if hp >= hard:
+        if self._judge_heap_by_gc(health):
+            out.extend(self._gc_pressure(health, hard, need))
+        elif hp >= hard:
             out.append(f"JVM heap {hp:.0f}% (over the hard limit {hard:.0f}%)")
             self._heap_streak = 0
         elif hp >= soft:
@@ -142,6 +162,65 @@ class HealthGuard:
                 out.append(f"{name} rising steadily ({int(self.trackers[tkey].latest()):,})")
         return out
 
+    def _judge_heap_by_gc(self, health: dict) -> bool:
+        use_gc = (getattr(self.cfg, "health_heap_signal", "auto") != "used"
+                  and health.get("gc_full_count") is not None
+                  and health.get("gc_time_ms") is not None)
+        mode = "gc" if use_gc else "used"
+        if mode != self._heap_mode:
+            self._heap_mode = mode
+            log.info("Graylog heap pressure judged from "
+                     + ("garbage-collector metrics" if use_gc else "heap used %"),
+                     heap_signal=mode)
+        return use_gc
+
+    def _gc_pressure(self, health: dict, hard: float, need: int) -> list[str]:
+        """Heap pressure from what the garbage collector is DOING, not used/max.
+
+        used/max counts garbage the next young collection frees and old-
+        generation garbage G1 has not marked yet: a healthy 3 GB Graylog swings
+        between 75% and 95% with no export running, so readings near the top
+        of that sawtooth kept tripping the used% check — a nightly 7.5M-record
+        API export spent 54% of its 6 hours paused. A Graylog that really is
+        running out of heap shows it in the collector (measured on a 3 GB
+        Graylog 7.1: export-shaped load, 2.7% GC time and no full GC; a load
+        that exhausted the heap, 30 full GCs in 3 minutes, then OOM):
+          * heap still >= the hard limit right after a collection
+          * any full GC since the previous reading
+          * GC pauses >= health_gc_overhead_pct of wall time, sustained
+        """
+        out: list[str] = []
+        now = self._clock()
+        full, gc_ms = health["gc_full_count"], health["gc_time_ms"]
+        prev, self._gc_prev = self._gc_prev, (now, full, gc_ms)
+        after = health.get("heap_after_gc_pct")
+        if after is not None and after >= hard:
+            out.append(f"JVM heap {after:.0f}% still in use right after garbage "
+                       f"collection (limit {hard:.0f}%)")
+        if prev is None:
+            return out
+        elapsed = now - prev[0]
+        d_full, d_gc = full - prev[1], gc_ms - prev[2]
+        if elapsed <= 0 or d_full < 0 or d_gc < 0:
+            # Graylog restarted between readings: its counters started over.
+            self._gc_streak = 0
+            return out
+        if d_full > 0:
+            out.append(f"{d_full} full garbage collection(s) in the last "
+                       f"{elapsed:.0f}s (Graylog heap exhausted)")
+        if elapsed < 1:
+            return out
+        share = d_gc / (elapsed * 1000.0) * 100.0
+        limit = getattr(self.cfg, "health_gc_overhead_pct", 10.0)
+        if share >= limit:
+            self._gc_streak += 1
+            if self._gc_streak >= need:
+                out.append(f"JVM spent {share:.0f}% of the last {elapsed:.0f}s in "
+                           f"garbage collection (limit {limit:.0f}%)")
+        else:
+            self._gc_streak = 0
+        return out
+
     async def checkpoint(self, progress: dict | None = None) -> None:
         """Called FREQUENTLY by the export loop (per batch). It only actually
         reads Graylog every `health_sample_interval_sec` — so the sampling
@@ -154,9 +233,43 @@ class HealthGuard:
         if now - self._last_sample < self._interval:
             return
         self._last_sample = now
-        tripped = self._tripped(await self._read())
+        health = await self._read()
+        tripped = self._tripped(health)
+        self._update_pace(health)
         if tripped:
             await self._pause_until_clear(tripped, progress)
+
+    async def pace(self) -> None:
+        """Per-page delay for the API export (0 unless Graylog's heap after
+        GC is above health_pace_start_pct). Call once per fetched page."""
+        if self.pace_delay > 0:
+            await asyncio.sleep(self.pace_delay)
+
+    def _update_pace(self, health) -> None:
+        """Delay per page grows linearly from 0 at health_pace_start_pct to
+        health_pace_max_delay_sec at jvm_memory_hard_pct of heap after GC.
+
+        Graylog's heap follows the export's rate over the last 5 minutes (it
+        keeps every result that long), so a delay that rises with the heap
+        settles at the rate this Graylog can hold instead of oscillating
+        between full speed, full GCs and a stop. Only the GC-metric reading is
+        steady enough to steer by; raw used % swings with every young GC."""
+        if not self.pace_searches or not health:
+            return
+        after = health.get("heap_after_gc_pct")
+        if after is None or not self._judge_heap_by_gc(health):
+            new = 0.0
+        else:
+            start = getattr(self.cfg, "health_pace_start_pct", 70.0)
+            hard = getattr(self.cfg, "jvm_memory_hard_pct", 90.0)
+            most = max(0.0, getattr(self.cfg, "health_pace_max_delay_sec", 5.0))
+            span = max(1.0, hard - start)
+            new = 0.0 if after <= start else min(most, most * (after - start) / span)
+        new = round(new, 2)
+        if (new == 0) != (self.pace_delay == 0) or abs(new - self.pace_delay) >= 0.5:
+            log.info("export pacing adjusted", delay_per_page_sec=new,
+                     heap_after_gc_pct=None if after is None else round(after, 1))
+        self.pace_delay = new
 
     async def _pause_until_clear(self, tripped: list[str], progress: dict | None) -> None:
         self.pause_count += 1
@@ -166,13 +279,20 @@ class HealthGuard:
         interval = getattr(self.cfg, "health_pause_interval_sec", 15)
         max_wait = getattr(self.cfg, "health_max_pause_min", 30) * 60
         drain = getattr(self.cfg, "health_resume_drain_ratio", 0.7)
+        flush_after = getattr(self.cfg, "health_search_cache_flush_sec", 310) or 0
         peak: dict[str, float] = {}
         waited = 0
+        current = tripped
+        last_flush = None
         while waited < max_wait:
             await asyncio.sleep(interval)
             waited += interval
             self.total_paused_sec += interval
             self._raise_if_cancelled(waited)
+            if (flush_after and waited >= flush_after and _heap_bound(current)
+                    and (last_flush is None or waited - last_flush >= 60)):
+                last_flush = waited
+                await self._release_expired_searches(waited)
             health = await self._read()
             if health is None:
                 self._emit(progress, f"Graylog not responding; still waiting (paused {waited}s)")
@@ -180,6 +300,7 @@ class HealthGuard:
             for mkey in _DRAIN_METRICS:
                 peak[mkey] = max(peak.get(mkey, 0), health.get(mkey, 0))
             now_tripped = self._tripped(health)
+            current = now_tripped or current
             drained = all(
                 health.get(mkey, 0) <= max(1, peak.get(mkey, 0)) * drain
                 for mkey in _DRAIN_METRICS
@@ -201,6 +322,19 @@ class HealthGuard:
         except Exception as e:
             log.warning("Backpressure-stop notification failed - the stop was NOT reported to any channel", error=str(e))
         raise RuntimeError(msg)
+
+    async def _release_expired_searches(self, waited: int) -> None:
+        release = getattr(self.monitor, "release_expired_searches", None)
+        if release is None:
+            return
+        try:
+            n = await release()
+        except Exception as e:
+            log.warning("Could not ask Graylog to release expired search results",
+                        error=str(e))
+            return
+        log.info("asked Graylog to release expired search results",
+                 searches=n, waited_sec=waited)
 
     def _raise_if_cancelled(self, waited: int) -> None:
         if self.cancel_check and self.cancel_check():
