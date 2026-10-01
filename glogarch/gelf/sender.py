@@ -11,6 +11,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from glogarch.utils.logging import get_logger
+from glogarch.utils.timefmt import parse_fixed_naive, shapes_for
 
 log = get_logger("gelf.sender")
 
@@ -27,20 +28,30 @@ SYSLOG_LEVELS = {
 }
 
 
+_TS_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S.%fZ",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S.%f+00:00",
+    "%Y-%m-%dT%H:%M:%S+00:00",
+    "%Y-%m-%d %H:%M:%S.%f",
+    "%Y-%m-%d %H:%M:%S",
+)
+_TS_SHAPES = shapes_for(_TS_FORMATS)
+
+
 def _parse_timestamp(ts: Any) -> float:
     """Convert various timestamp formats to Unix epoch float."""
     if isinstance(ts, (int, float)):
         return float(ts)
     if isinstance(ts, str):
-        # Try ISO format first
-        for fmt in (
-            "%Y-%m-%dT%H:%M:%S.%fZ",
-            "%Y-%m-%dT%H:%M:%SZ",
-            "%Y-%m-%dT%H:%M:%S.%f+00:00",
-            "%Y-%m-%dT%H:%M:%S+00:00",
-            "%Y-%m-%d %H:%M:%S.%f",
-            "%Y-%m-%d %H:%M:%S",
-        ):
+        # Same naive result as the strptime loop below, several times cheaper.
+        # timestamp() can only fail for a date at the very edge of the range;
+        # those take the loop, which hits the same error and handles it the
+        # way it always has.
+        dt = parse_fixed_naive(ts, _TS_SHAPES)
+        if dt is not None and datetime.min.replace(year=2) < dt < datetime.max.replace(year=9998):
+            return dt.timestamp()
+        for fmt in _TS_FORMATS:
             try:
                 dt = datetime.strptime(ts, fmt)
                 return dt.timestamp()
@@ -131,6 +142,11 @@ class GelfSender:
         self._udp_transport = None
         self._connected = False
         self._messages_sent = 0
+        # Times the TCP connection was lost and re-established mid-send. Bytes
+        # still in transit when a connection drops are lost and TCP cannot say
+        # which messages they were, so the importer must not call such a run
+        # verified.
+        self.reconnects = 0
 
     # Never block forever on a wedged/unreachable target — a hung connect/send would
     # make Cancel impossible (the import loop can't reach its cancel checkpoint).
@@ -189,12 +205,25 @@ class GelfSender:
         data = json.dumps(gelf_msg, ensure_ascii=False, default=str).encode("utf-8")
 
         if self.protocol == "tcp":
-            if not self._writer:
+            w = self._writer
+            if not w:
                 raise RuntimeError("TCP writer not available")
-            self._writer.write(data + b"\x00")
-            # Bounded drain: if the target's TCP buffer is full (Graylog wedged),
-            # drain() would block indefinitely and Cancel could never take effect.
-            await asyncio.wait_for(self._writer.drain(), timeout=self.DRAIN_TIMEOUT)
+            # drain() is what used to notice a dead connection. It is skipped
+            # below while nothing is queued, so check here: writing to a closed
+            # transport silently drops the data.
+            if w.transport.is_closing():
+                raise ConnectionResetError("GELF TCP connection is closed")
+            w.write(data + b"\x00")
+            # Wait only when bytes are left queued (the target is not keeping
+            # up) or this very write found the connection gone: write() then
+            # drops the data without raising, and drain() is what raises, so
+            # this message is retried after the reconnect exactly as before.
+            # Otherwise drain() returns at once anyway, but wrapping it in
+            # wait_for() per message built a task every time — that, not the
+            # network, capped a send at ~2,400 messages/s. Bounded: a wedged
+            # Graylog must never make Cancel unreachable.
+            if w.transport.get_write_buffer_size() or w.transport.is_closing():
+                await asyncio.wait_for(w.drain(), timeout=self.DRAIN_TIMEOUT)
         else:
             if not self._udp_transport:
                 raise RuntimeError("UDP transport not available")
@@ -252,6 +281,10 @@ class GelfSender:
                         await self.connect()
                         await self.send_message(gelf_msg)
                         sent += 1
+                        self.reconnects += 1
+                        log.warning("GELF connection lost and re-established; messages "
+                                    "in transit at that moment may not have reached "
+                                    "the target", reconnects=self.reconnects, sent=sent)
                     except Exception as e2:
                         log.error("Reconnect failed", error=str(e2))
                         return sent

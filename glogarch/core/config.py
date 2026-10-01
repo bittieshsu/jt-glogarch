@@ -83,6 +83,7 @@ class ExportConfig(BaseModel):
     health_buffer_min_delta: int = 64       # min buffer growth/sample to count
     health_pause_interval_sec: int = 15     # re-check cadence while paused
     health_max_pause_min: int = 30          # give up (stop export) after this long paused
+    health_stop_retry_min: int = 60         # scheduled run stopped that way: try once more after this (0 = next run)
     health_resume_drain_ratio: float = 0.7  # resume when signal <= peak * this
     connection_failure_limit: int = 10      # consecutive connection failures → abort
 

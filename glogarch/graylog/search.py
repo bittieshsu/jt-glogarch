@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
+import time
 from datetime import datetime, timedelta
 from typing import Any, AsyncIterator, Callable
 
@@ -39,11 +40,15 @@ class GraylogSearch:
     Uses time-based pagination to avoid Graylog's deep pagination limit.
     """
 
+    _CPU_SAMPLE_SEC = 15
+
     def __init__(self, client: GraylogClient, system_monitor: SystemMonitor | None = None,
                  delay_between_requests_ms: int = 200):
         self.client = client
         self.system_monitor = system_monitor
         self._delay_ms = delay_between_requests_ms
+        self._cpu = 0.0
+        self._cpu_at: float | None = None
         # Timestamps where >RESULT_WINDOW messages shared one millisecond, so
         # Graylog's offset-paginated REST API could not read past the first
         # RESULT_WINDOW. We keep those, skip the rest of that one millisecond,
@@ -65,10 +70,16 @@ class GraylogSearch:
         sort_order: str = "asc",
     ) -> SearchResult:
         """Execute a search using the Universal Absolute Search API (Graylog 6.x/7.x)."""
-        # Adaptive backoff check
+        # Adaptive backoff check. The CPU reading is refreshed at most every
+        # _CPU_SAMPLE_SEC: fetching /api/system/jvm before EVERY page spent one
+        # of the rate limiter's 2 requests/s on it, halving how fast a Graylog
+        # that answers quickly could be paged (999 vs 2,048 messages/s).
         if self.system_monitor:
-            cpu = await self.system_monitor.get_cpu_percent()
-            await self.client.rate_limiter.adaptive_backoff(cpu)
+            now = time.monotonic()
+            if self._cpu_at is None or now - self._cpu_at >= self._CPU_SAMPLE_SEC:
+                self._cpu = await self.system_monitor.get_cpu_percent()
+                self._cpu_at = now
+            await self.client.rate_limiter.adaptive_backoff(self._cpu)
 
         # Millisecond precision is REQUIRED. Truncating to `.000Z` (whole second)
         # makes deep-pagination window advancement re-fetch from the start of the

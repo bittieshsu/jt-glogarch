@@ -21,14 +21,16 @@ from glogarch.core.models import (
     JobType,
 )
 from glogarch.export.exporter import (ExportResult, _ensure_naive, _is_cancellation,
+                                      backpressure_stop_summary,
                                       ExportCancelled, fire_progress_after_record)
 from glogarch.graylog.client import GraylogClient
 from glogarch.graylog.system import SystemMonitor
-from glogarch.export.health_guard import HealthGuard
+from glogarch.export.health_guard import BackpressureStop, HealthGuard
 from glogarch.opensearch.client import OpenSearchClient
 from glogarch.ratelimit.limiter import RateLimiter
 from glogarch import __version__
 from glogarch.utils.logging import get_logger
+from glogarch.utils.timefmt import parse_fixed_naive, shapes_for
 
 log = get_logger("opensearch.export")
 
@@ -53,6 +55,16 @@ def is_os_export_running(server_name: str) -> bool:
     See is_export_running() in export.exporter — advisory, same key scheme.
     """
     return bool(_os_export_lock.get(server_name + "_os"))
+
+
+_TS_FORMATS = (
+    "%Y-%m-%dT%H:%M:%S.%fZ",
+    "%Y-%m-%dT%H:%M:%SZ",
+    "%Y-%m-%dT%H:%M:%S.%f+00:00",
+    "%Y-%m-%d %H:%M:%S.%f",
+    "%Y-%m-%d %H:%M:%S",
+)
+_TS_SHAPES = shapes_for(_TS_FORMATS)
 
 
 class OpenSearchExporter:
@@ -369,8 +381,8 @@ class OpenSearchExporter:
                             # bytes it had actually written.
                             salvaged = result.partial_index_messages
                             result.messages_total += salvaged
-                            if _is_cancellation(e):
-                                raise   # not an index failure — one handler files it
+                            if _is_cancellation(e) or isinstance(e, BackpressureStop):
+                                raise   # not an index failure — ends the run
                             err = f"Index {index_name} failed: {e}"
                             log.error(err, records_kept=salvaged)
                             result.errors.append(err)
@@ -512,15 +524,24 @@ class OpenSearchExporter:
                 result.cancelled = True
                 log.info("Export cancelled by user", job_id=job_id)
                 return result
+            stopped = isinstance(e, BackpressureStop)
+            err_str = (backpressure_stop_summary(str(e), result.messages_total)
+                       if stopped else str(e))
             self.db.update_job(job_id, status=JobStatus.FAILED,
-                               error_message=str(e), completed_at=datetime.utcnow())
-            result.errors.append(str(e))
-            log.error("OpenSearch export failed", error=str(e))
-            try:
-                from glogarch.notify.sender import notify_error
-                await notify_error("Export (OpenSearch)", str(e))
-            except Exception as e:
-                log.warning("Export-error notification failed - the failure was NOT reported to any channel", error=str(e))
+                               error_message=err_str, messages_done=result.messages_total,
+                               completed_at=datetime.utcnow())
+            result.errors.append(err_str)
+            log.error("OpenSearch export failed", error=err_str)
+            # A scheduled run's backpressure stop is reported once by the
+            # scheduler, which may still try again later.
+            if not (stopped and source.startswith("scheduled")):
+                try:
+                    from glogarch.notify.sender import notify_error
+                    await notify_error("Export (OpenSearch)", err_str)
+                except Exception as nerr:
+                    log.warning("Export-error notification failed - the failure was NOT reported to any channel", error=str(nerr))
+            if stopped:
+                raise BackpressureStop(err_str) from e
             raise
         finally:
             _os_export_lock.pop(server_key, None)
@@ -1063,13 +1084,11 @@ class OpenSearchExporter:
 
     @staticmethod
     def _parse_ts(ts: str) -> datetime | None:
-        for fmt in (
-            "%Y-%m-%dT%H:%M:%S.%fZ",
-            "%Y-%m-%dT%H:%M:%SZ",
-            "%Y-%m-%dT%H:%M:%S.%f+00:00",
-            "%Y-%m-%d %H:%M:%S.%f",
-            "%Y-%m-%d %H:%M:%S",
-        ):
+        # Same naive result as the strptime loop below, ~40x cheaper.
+        dt = parse_fixed_naive(ts, _TS_SHAPES)
+        if dt is not None:
+            return dt
+        for fmt in _TS_FORMATS:
             try:
                 return datetime.strptime(ts, fmt)
             except ValueError:

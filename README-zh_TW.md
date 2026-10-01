@@ -1,4 +1,4 @@
-# jt-glogarch v1.16.0
+# jt-glogarch v1.16.1
 
 **語言**： [English](README.md) | **繁體中文** | [日本語](README-ja.md)  
 **網站**： <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Graylog Open (6.x / 7.x) 的記錄歸檔與還原工具
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.16.0-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.16.1-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open 版本不支援 Enterprise 版的 Archive 功能。
@@ -1134,8 +1134,10 @@ Protocol:     TCP   ← 預設。可靠,有 backpressure
 
 > **⚠️ UDP vs TCP — 重要警告：**
 > - **TCP（建議，預設）：** 有內建 backpressure。當目標 Graylog input buffer 滿
->   時，TCP 寫入會自然暫停傳送，jt-glogarch 會跟著降速，**不會掉訊息**。吞吐量
->   約 1,000~3,000 筆/秒。
+>   時，TCP 寫入會自然暫停傳送，jt-glogarch 會跟著降速，所以 buffer 滿了**也不會掉訊息**。
+>   只有匯入途中連線斷掉（例如 Graylog 重啟）時，當下還在傳送中的訊息可能遺失；這時匯入結果
+>   會明確說明，不會標示為「已驗證」。吞吐量通常由目標 Graylog 的 input 決定，實測送到小型
+>   Graylog 7.1 約每秒 4,600 筆。
 > - **UDP（不建議用於大量匯入）：** 較快（~5,000~10,000 筆/秒）但 buffer 滿時會**無聲地丟掉封包**，jt-glogarch 完全收不到任何錯誤回報 — `messages_done` 會說「我送了 X 筆」，但目標 Graylog 可能只收到一部分。症狀：匯入後的時間軸會看到一段一段空白。**百萬筆等級的匯入若沒有流量控制，UDP 損失率常見 20-30%。**
 >
 > 即使使用 UDP，Journal 監控（透過 Graylog API）永遠開啟，當對方未處理的
@@ -1477,7 +1479,7 @@ Full GC、GC 花了多少時間，而不是看原始使用率。健康的 JVM �
   撐得住的程度；
 - 發生 **Full GC**，或 GC 後 heap 達 **90%**，就**暫停**。Graylog 只有在處理下一次搜尋時才會清掉
   暫存的結果，所以因 heap 暫停超過 5 分鐘時，會送幾次只抓 1 筆的搜尋，heap 才降得下來；
-- 壓力持續 **30 分鐘**（`health_max_pause_min`）仍未解除，匯出就會停止並發出通知。
+- 壓力持續 **30 分鐘**（`health_max_pause_min`）仍未解除，這次執行就停止（已封存的資料保留不動），排程執行會在 1 小時後再試一次（`health_stop_retry_min`），還是不行就留給下一次排程；不論哪種情況都只發一則通知。
 
 在 3 GB heap 的 Graylog 7.1 實測：控速後每秒 478 筆，6 小時只有 1 次 Full GC，GC 後 heap 最高 86%；
 舊的使用率判斷平均每秒 330～360 筆，每晚有一半以上的時間在暫停。所有參數見 CONFIG-zh_TW.md 的

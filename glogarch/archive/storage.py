@@ -15,6 +15,15 @@ from glogarch.core.config import ExportConfig
 from glogarch.core.models import ArchiveMetadata
 from glogarch.utils.logging import get_logger
 
+# json.dumps(msg, ensure_ascii=False, default=str) builds a new JSONEncoder on
+# every call because its arguments are not the defaults; one reused encoder
+# writes the same bytes for less.
+_MSG_ENCODER = json.JSONEncoder(ensure_ascii=False, default=str)
+
+_JAVA_LONG_MIN, _JAVA_LONG_MAX = -9223372036854775808, 9223372036854775807
+_EXACT_TYPE_CLASS = {str: "string", int: "numeric", float: "numeric",
+                     bool: "other", type(None): "other"}
+
 log = get_logger("archive.storage")
 
 
@@ -334,30 +343,43 @@ class StreamingArchiveWriter:
         "gl2_processing_duration_ms", "gl2_accounted_message_size",
     })
 
+    @staticmethod
+    def _classify_value(v) -> str:
+        if v is None or isinstance(v, bool):
+            return "other"
+        if isinstance(v, (int, float)):
+            # A numeric value outside Java long range (e.g. a Windows Event
+            # Log "Keywords" 2^63 bitmask) overflows OpenSearch's auto 'long'
+            # mapping and causes an indexer failure. Classify it as string so
+            # preflight pins the field as keyword BEFORE the GELF send — such
+            # a bitmask/id field is correctly a keyword anyway.
+            if isinstance(v, int) and not (_JAVA_LONG_MIN <= v <= _JAVA_LONG_MAX):
+                return "string"
+            return "numeric"
+        if isinstance(v, str):
+            return "string"
+        return "other"
+
     def _track_field_types(self, msg: dict) -> None:
         """Record the value type of every field in the message.
-        Costs ~10us per message, negligible vs gzip+JSON write."""
+
+        Exact JSON types are looked up by type() — the same answers as
+        _classify_value at about half the cost; anything else (a subclass)
+        goes through _classify_value itself."""
+        reserved = self._SCHEMA_RESERVED
+        types = self._field_types
         for k, v in msg.items():
-            if k in self._SCHEMA_RESERVED:
+            if k in reserved:
                 continue
-            if v is None or isinstance(v, bool):
-                t = "other"
-            elif isinstance(v, (int, float)):
-                t = "numeric"
-                # A numeric value outside Java long range (e.g. a Windows Event
-                # Log "Keywords" 2^63 bitmask) overflows OpenSearch's auto 'long'
-                # mapping and causes an indexer failure. Classify it as string so
-                # preflight pins the field as keyword BEFORE the GELF send — such
-                # a bitmask/id field is correctly a keyword anyway.
-                if isinstance(v, int) and not (-9223372036854775808 <= v <= 9223372036854775807):
-                    t = "string"
-            elif isinstance(v, str):
+            tv = type(v)
+            t = _EXACT_TYPE_CLASS.get(tv)
+            if t is None:
+                t = self._classify_value(v)
+            elif tv is int and not (_JAVA_LONG_MIN <= v <= _JAVA_LONG_MAX):
                 t = "string"
-            else:
-                t = "other"
-            s = self._field_types.get(k)
+            s = types.get(k)
             if s is None:
-                self._field_types[k] = {t}
+                types[k] = {t}
             else:
                 s.add(t)
 
@@ -368,7 +390,7 @@ class StreamingArchiveWriter:
         for msg in messages:
             if not self._first:
                 self._file.write(",")
-            msg_str = json.dumps(msg, ensure_ascii=False, default=str)
+            msg_str = _MSG_ENCODER.encode(msg)
             self._file.write(msg_str)
             self._original_bytes += len(msg_str.encode("utf-8"))
             self._first = False

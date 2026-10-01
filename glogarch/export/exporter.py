@@ -29,7 +29,7 @@ from glogarch.core.models import (
 from glogarch.graylog.client import GraylogClient
 from glogarch.graylog.search import GraylogSearch
 from glogarch.graylog.system import SystemMonitor
-from glogarch.export.health_guard import HealthGuard
+from glogarch.export.health_guard import BackpressureStop, HealthGuard
 from glogarch.ratelimit.limiter import RateLimiter
 from glogarch import __version__
 from glogarch.utils.logging import get_logger
@@ -150,6 +150,12 @@ def fire_progress_after_record(exporter, progress_callback, info: dict) -> None:
             exporter._cancelled = True
             return
         raise
+
+
+def backpressure_stop_summary(stop_message: str, archived: int) -> str:
+    """The job/notification text for a run ended by BackpressureStop."""
+    return (f"{stop_message} {archived:,} record(s) were archived in this run before "
+            f"the stop and stay archived; the next run continues from there.")
 
 
 class ExportResult:
@@ -383,8 +389,8 @@ class Exporter:
                                 consecutive_failures = 0
 
                             except Exception as e:
-                                if _is_cancellation(e):
-                                    raise   # not a chunk failure — one handler files it
+                                if _is_cancellation(e) or isinstance(e, BackpressureStop):
+                                    raise   # not a chunk failure — ends the run
                                 err_msg = f"Chunk {chunk_idx+1} failed: {e}"
                                 log.error(err_msg, chunk_from=str(chunk_from))
                                 result.errors.append(err_msg)
@@ -571,19 +577,28 @@ class Exporter:
             if "401" in err_str or "Unauthorized" in err_str:
                 err_str = (f"Graylog API authentication failed (401). "
                            f"Check that the API token is still valid: {err_str}")
+            stopped = isinstance(e, BackpressureStop)
+            if stopped:
+                err_str = backpressure_stop_summary(err_str, result.messages_total)
             self.db.update_job(
                 job_id,
                 status=JobStatus.FAILED,
                 error_message=err_str,
+                messages_done=result.messages_total,
                 completed_at=datetime.utcnow(),
             )
             result.errors.append(err_str)
             log.error("Export failed", job_id=job_id, error=err_str)
-            try:
-                from glogarch.notify.sender import notify_error
-                await notify_error("Export", err_str)
-            except Exception as nerr:
-                log.warning("Notification send failed", error=str(nerr))
+            # A scheduled run's backpressure stop is reported once by the
+            # scheduler, which may still try again later.
+            if not (stopped and source.startswith("scheduled")):
+                try:
+                    from glogarch.notify.sender import notify_error
+                    await notify_error("Export", err_str)
+                except Exception as nerr:
+                    log.warning("Notification send failed", error=str(nerr))
+            if stopped:
+                raise BackpressureStop(err_str) from e
             raise
         finally:
             _export_lock.pop(server_key, None)

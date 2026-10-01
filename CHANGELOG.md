@@ -2,6 +2,73 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.16.1] - 2026-10-02
+
+### Fixed
+
+- **A backpressure stop ran the night down.** When the source stayed under load
+  for `health_max_pause_min` (30 minutes), the guard's stop was caught as a CHUNK
+  failure (API) or an INDEX failure (OpenSearch-direct), so the next chunk or index
+  paused another 30 minutes; the run then failed and the scheduler retried a minute
+  later into the same load. One staging night ran three attempts of 1.5–2.5 h each
+  and sent four notifications. Now the stop ends the run once: whole hours already
+  archived stay archived, the open hour is discarded and the next run continues
+  from it, and the job row says how many records were archived before the stop. A
+  scheduled run tries once more after `health_stop_retry_min` (60 minutes, new;
+  0 = wait for the next scheduled run) instead of three quick retries, and the
+  schedule sends one notification, not one per attempt. Other errors keep the
+  quick retries.
+- **A GELF import whose connection dropped could still say "Verified at target".**
+  The check only compares Graylog's indexer failures, which says nothing about
+  messages that never arrived; bytes in transit when a TCP connection resets are
+  lost and TCP cannot say which. The sender now counts reconnects, and an import
+  that reconnected reports that it is NOT verified, with what to check (the message
+  count in Graylog, or a Bulk-mode re-import, which de-duplicates by message id).
+- README said GELF over TCP never loses messages; only a connection that breaks
+  mid-import can, and the import now says so.
+
+### Performance
+
+Each fast path returns exactly what the code it short-cuts returned
+(`tests/test_fast_paths_equivalence.py`); measured on real archives (355,429 API
+and 256,458 OpenSearch-direct messages):
+
+| | before | after |
+|---|---|---|
+| GELF send, separate-process receiver | 3,600–5,100 msg/s | 10,100–17,200 msg/s |
+| GELF send into a Graylog 7.1 (.83), 30,000 messages, all indexed | 2,891 msg/s | 4,595 msg/s |
+| GELF timestamp parse | 18–19 µs | 7 µs |
+| GELF message conversion | 57–60 µs | 38–39 µs |
+| OpenSearch-direct timestamp parse | 40–48 µs | 4.6–5.1 µs |
+| field-type tracking | 25–29 µs | 17.5 µs |
+| archive write (JSON + gzip + types) | 154 µs | 129–140 µs |
+
+- GELF: the socket is drained only while bytes are actually queued; `wait_for(drain())`
+  on every message built a task each time. A closed connection is still detected
+  before and after each write, so a dropped write is retried exactly as before.
+- Timestamps: a regex for the two shapes archives contain, in front of the strptime
+  loops; anything else still goes through strptime.
+- API export: the Graylog CPU reading for the adaptive back-off is refreshed every
+  15 s instead of before every page — it spent one of the rate limiter's 2
+  requests/s, which halves the page rate on a Graylog that answers quickly.
+- Not changed, on purpose: archive JSON spacing. A compact encoder would be faster
+  but the record-search prefilter matches raw file bytes, and a list value such as
+  `[1, 2]` would stop matching a search for `1, 2`.
+
+### Upgrade
+
+- No database change. `health_stop_retry_min` is optional (default 60).
+
+### Tests
+
+- `tests/test_fast_paths_equivalence.py` (12): fixed-shape parser vs strptime on edge
+  cases and 4,000 fuzzed strings; GELF and OS-direct parsers vs the old functions;
+  field types vs the isinstance chain; encoder bytes; GELF delivery, closed
+  connection, a reset by a threaded receiver (noticed, counted, bounded loss); an
+  import with and without a reconnect.
+- `tests/test_backpressure_stop.py` (9): guard, API and OS-direct exporters,
+  scheduler retry and notification policy.
+
 ## [1.16.0] - 2026-09-28
 
 ### Changed

@@ -600,6 +600,25 @@ GL_PASS='<graylog-admin-密碼>' bash scripts/e2e-archive-test.sh
 - [ ] **在 staging 實跑一晚**，同時對來源 Graylog 做唯讀 GC 取樣：總耗時和前幾晚比較、各原因的
       暫停次數、沒有因「did not drain」停止、執行期間的 Full GC 次數。
 
+### 熱點加速、GELF 重新連線、反壓停止（v1.16.1）
+
+- [ ] **快速路徑結果完全相同**（`tests/test_fast_paths_equivalence.py`）：固定格式的時間解析和它前面
+      的 strptime 迴圈從不產生不同結果（邊界案例加 4,000 筆模糊字串，兩組格式都測）；GELF 與
+      OpenSearch 直連的解析結果和舊函式一樣（結尾的 `Z` 照舊當成本機時間、丟出一樣的例外）；欄位型別
+      追蹤和 isinstance 判斷鏈相同（含子類別與 2^63）；重複使用的 encoder 輸出和 `json.dumps` 位元組
+      完全相同。封存 JSON 的空白格式刻意不改，因為記錄搜尋的預先篩選是比對原始位元組。
+- [ ] **GELF 送出每一筆都有交代**：沒有異常時全部送達；接收端（獨立 thread）中途重置時，會被偵測到並
+      計入 `reconnects`，只會遺失當下還在傳送中的資料；連線已關閉時會丟出錯誤，不會無聲地丟掉寫入。
+      對真的 Graylog（.83）：新舊版都送出 30,000 筆、收到 30,000 筆。
+- [ ] **重新連線過的 GELF 匯入不會標示為「已驗證」**：0 個索引失敗但有重新連線時，結果與作業紀錄
+      都出現「NOT verified」警告；沒有重新連線時仍顯示「Verified at target」。
+- [ ] **反壓停止只結束一次**（`tests/test_backpressure_stop.py`）：保護機制丟出 `BackpressureStop`、
+      自己不發通知；API 匯出在區段中途停止，不出現「Chunk N failed」，只保留完整的小時；OpenSearch 直連
+      停止時不出現「Index X failed」，也不會碰下一個 index；手動執行只通知一次，排程執行交給排程處理；
+      排程在 `health_stop_retry_min` 後只重試一次（不是 3 次快速重試）、只通知一次、不多出空的失敗紀錄，
+      其他錯誤仍維持快速重試。對真的 Graylog（.83）：強制停止時只暫停一次就結束，並附上「stay archived」
+      摘要。
+
 ### 測試結果
 
 - [ ] `./scripts/run-tests.sh` 通過 — `TEST-RESULTS.md` 已產生

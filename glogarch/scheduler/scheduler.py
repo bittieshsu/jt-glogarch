@@ -16,6 +16,7 @@ from glogarch.core.config import Settings, get_settings
 from glogarch.core.database import ArchiveDB
 from glogarch.core.models import JobRecord, JobStatus, JobType, ScheduleRecord
 from glogarch.export.exporter import Exporter
+from glogarch.export.health_guard import BackpressureStop
 from glogarch.utils.logging import get_logger
 
 log = get_logger("scheduler")
@@ -140,11 +141,31 @@ class ArchiveScheduler:
         self._running_jobs[_key] = True
         last_error = None
         skipped_due_to_running = False
+        stop_retried = False
         try:
-            for attempt in range(1, self._EXPORT_MAX_RETRIES + 1):
+            attempt = 0
+            while attempt < self._EXPORT_MAX_RETRIES:
+                attempt += 1
                 try:
                     await self._run_export_once(schedule_name)
                     last_error = None
+                    break
+                except BackpressureStop as e:
+                    # The source stayed under load for health_max_pause_min. A
+                    # retry a minute later meets the same load (one night: three
+                    # attempts of 1.5-2.5 h, four notifications), so try ONCE
+                    # more after health_stop_retry_min, then leave the rest to
+                    # the next scheduled run.
+                    last_error = e
+                    wait_min = getattr(self.settings.export, "health_stop_retry_min", 60) or 0
+                    if wait_min > 0 and not stop_retried:
+                        stop_retried = True
+                        log.warning("Scheduled export stopped because the source stayed "
+                                    "under load; trying once more later",
+                                    schedule=schedule_name, retry_in_min=wait_min)
+                        await asyncio.sleep(wait_min * 60)
+                        attempt -= 1   # the delayed retry is not one of the quick ones
+                        continue
                     break
                 except Exception as e:
                     err_str = str(e)
@@ -171,7 +192,21 @@ class ArchiveScheduler:
                         log.error("Scheduled export failed after all retries",
                                   attempts=self._EXPORT_MAX_RETRIES, error=err_str)
 
-            if last_error is not None:
+            if isinstance(last_error, BackpressureStop):
+                # The exporter already recorded each stopped run in Job History;
+                # one notification for the schedule, not one per attempt.
+                note = (f" A second attempt {getattr(self.settings.export, 'health_stop_retry_min', 60)} "
+                        f"minutes later stopped too." if stop_retried else "")
+                log.error("Scheduled export stopped by backpressure; the next "
+                          "scheduled run continues", schedule=schedule_name,
+                          retried=stop_retried)
+                try:
+                    from glogarch.notify.sender import notify_error
+                    await notify_error("Export", f"{last_error}{note}")
+                except Exception as nerr:
+                    log.warning("Backpressure-stop notification failed - the stop was "
+                                "NOT reported to any channel", error=str(nerr))
+            elif last_error is not None:
                 # Record failed job so it appears in Job History
                 from glogarch.utils.sanitize import sanitize
                 job_id = self._create_run_job(JobType.EXPORT, "scheduled")

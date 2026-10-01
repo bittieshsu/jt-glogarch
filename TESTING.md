@@ -774,6 +774,34 @@ failure.
       Graylog: total time vs the previous nights, pauses by reason, no
       "did not drain" stop, full GCs during the run.
 
+### Hot-path speed-ups, GELF reconnects, backpressure stop (v1.16.1)
+
+- [ ] **Fast paths are exact** (`tests/test_fast_paths_equivalence.py`): the
+      fixed-shape timestamp parser never disagrees with the strptime loop it
+      fronts (edge cases + 4,000 fuzzed strings, both format sets), the GELF and
+      OS-direct parsers return what the old functions returned (a literal `Z`
+      still read as local time, the same exceptions), field-type tracking equals
+      the isinstance chain (incl. subclasses and 2^63), the reused encoder writes
+      the same bytes as `json.dumps`. Archive JSON spacing is unchanged on purpose:
+      the record-search prefilter matches raw bytes.
+- [ ] **GELF send keeps every message accounted for**: all messages arrive with no
+      fault; a reset by a receiver on its own thread is noticed, counted
+      (`reconnects`) and loses only bytes in transit; a closed connection raises
+      instead of silently dropping writes. Against a real Graylog (.83): 30,000
+      sent, 30,000 indexed, old and new.
+- [ ] **A GELF import that reconnected is never "verified"**: 0 indexer failures
+      plus a reconnect gives the NOT-verified warning in the result and the job
+      row; no reconnect still gives "Verified at target".
+- [ ] **Backpressure stop ends the run once** (`tests/test_backpressure_stop.py`):
+      the guard raises `BackpressureStop` and sends nothing; the API export stops
+      inside a chunk without "Chunk N failed" and keeps only whole hours; the
+      OS-direct export stops without "Index X failed" and never touches the next
+      index; manual runs notify once, scheduled runs leave it to the scheduler;
+      the scheduler retries once after `health_stop_retry_min` (not three quick
+      retries), notifies once, adds no empty failed row, and keeps the quick
+      retries for other errors. Against a real Graylog (.83): a forced stop ends
+      after one pause with the "stay archived" summary.
+
 ### Test Results
 
 - [ ] `./scripts/run-tests.sh` passes — `TEST-RESULTS.md` generated

@@ -47,6 +47,15 @@ _BUFFERS = (
 _DRAIN_METRICS = ("journal_uncommitted", "buffer_process", "buffer_output", "buffer_input")
 
 
+class BackpressureStop(RuntimeError):
+    """The source stayed under load for health_max_pause_min: end THIS run.
+
+    Not a chunk or index failure — the next chunk would only pause another 30
+    minutes against the same pressure (one night ran three attempts of 1.5-2.5 h
+    each and sent four notifications) — and not worth an immediate retry.
+    Whatever was archived stays archived; the next run continues from there."""
+
+
 def _heap_bound(signals: list[str]) -> bool:
     """A pause caused by Graylog's heap (not the journal or buffers) — the only
     kind that releasing Graylog's cached search results can help."""
@@ -316,12 +325,9 @@ class HealthGuard:
                f"({'; '.join(tripped)}); export stopped. Consider OpenSearch-direct "
                f"mode, a larger Graylog heap, or a smaller export range.")
         log.error("export stopped — backpressure did not clear", signals=tripped, waited_sec=waited)
-        try:
-            from glogarch.notify.sender import notify_error
-            await notify_error("Export", msg)
-        except Exception as e:
-            log.warning("Backpressure-stop notification failed - the stop was NOT reported to any channel", error=str(e))
-        raise RuntimeError(msg)
+        # Reported once by whoever ends the run (exporter or scheduler), with
+        # what was archived — not here and again there.
+        raise BackpressureStop(msg)
 
     async def _release_expired_searches(self, waited: int) -> None:
         release = getattr(self.monitor, "release_expired_searches", None)

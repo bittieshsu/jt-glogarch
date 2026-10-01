@@ -1,4 +1,4 @@
-# jt-glogarch v1.16.0
+# jt-glogarch v1.16.1
 
 **Language**: **English** | [繁體中文](README-zh_TW.md) | [日本語](README-ja.md)  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Archive & restore logs for Graylog Open (6.x / 7.x)
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.16.0-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.16.1-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open does not include the Archive feature available in the Enterprise edition.
@@ -1205,8 +1205,11 @@ Target Name:  log-recovery
 
 > **⚠️ UDP vs TCP — important warning:**
 > - **TCP (recommended, default):** Has built-in backpressure. When the target Graylog
->   input buffer fills, the TCP send blocks naturally and jt-glogarch slows down.
->   No message loss. Throughput ~1,000-3,000 msg/s.
+>   input buffer fills, the TCP send blocks naturally and jt-glogarch slows down,
+>   so a full buffer never drops messages. Only a connection that breaks mid-import
+>   (e.g. Graylog restarted) can lose the messages in transit at that moment; the
+>   import then says so and is not reported as verified. Throughput is usually set
+>   by the target's input — 4,600 msg/s measured into a small Graylog 7.1.
 > - **UDP (not recommended for bulk import):** Faster (~5,000-10,000 msg/s) but
 >   **silently drops packets** when Graylog can't keep up. There is no error
 >   reported back to jt-glogarch — `messages_done` will say "X sent" but the
@@ -1635,8 +1638,9 @@ time — not by raw used %, which swings 75–95 % on a healthy JVM:
 - a **full GC**, or **90 %** heap after GC, **pauses** it; because Graylog drops those cached
   results only while it serves another search, a heap pause longer than 5 minutes sends a few
   1-message searches so the heap can actually fall;
-- if the pressure has not cleared after **30 minutes** (`health_max_pause_min`) the export stops
-  and notifies.
+- if the pressure has not cleared after **30 minutes** (`health_max_pause_min`) the run stops —
+  what it archived stays archived — and a scheduled run tries once more an hour later
+  (`health_stop_retry_min`) before leaving the rest to its next run; one notification either way.
 
 Measured on a 3 GB Graylog 7.1: the paced export ran at 478 messages/s with one full GC in six
 hours and the heap after GC never above 86 %, where the previous used % check averaged 330–360

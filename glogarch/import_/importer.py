@@ -154,6 +154,18 @@ class ImportResult:
         self.duration_seconds: float = 0.0
         self.indexer_failure_fields: list[str] = []  # fields auto-diagnosed on failure
         self.messages_indexed: int = 0  # destination-verified: sent - indexer failures
+        self.gelf_reconnects: int = 0   # GELF connection lost + re-established mid-send
+
+
+def _reconnect_warning(result: "ImportResult") -> str:
+    return (
+        f"The GELF connection to the target was lost {result.gelf_reconnects} time(s) "
+        f"and re-established during this import. Messages that were in transit at "
+        f"that moment may not have reached Graylog, and TCP cannot tell which, so "
+        f"this run is NOT verified even with 0 indexer failures. Check the message "
+        f"count in Graylog for this time range, or re-import with Bulk mode (it "
+        f"de-duplicates by message id)."
+    )
 
 
 def _import_summary(archives: int, sent: int, indexed: int, mode: str,
@@ -741,6 +753,7 @@ class Importer:
                                 cancel_check=lambda: fc.cancelled,
                             )
                             sent += batch_sent
+                            result.gelf_reconnects = sender.reconnects
 
                             if progress_callback:
                                 progress_callback({
@@ -840,6 +853,15 @@ class Importer:
                         result.errors.append(recon_msg)
                         # Mark as completed_with_failures via error_message
                         final_status = JobStatus.COMPLETED
+                        if result.gelf_reconnects:
+                            recon_msg += " " + _reconnect_warning(result)
+                            result.errors.append(_reconnect_warning(result))
+                    elif result.gelf_reconnects:
+                        # 0 indexer failures proves nothing about messages that
+                        # never arrived: do not call this run verified.
+                        recon_msg = _reconnect_warning(result)
+                        log.warning(recon_msg, reconnects=result.gelf_reconnects)
+                        result.errors.append(recon_msg)
                     else:
                         log.info(
                             "Reconciliation OK: 0 indexer failures — all messages "

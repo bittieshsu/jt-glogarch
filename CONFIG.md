@@ -97,6 +97,7 @@ export:
   health_buffer_min_delta: 64           # Min ring-buffer growth/sample to count as rising
   health_pause_interval_sec: 15         # How often to re-check while paused
   health_max_pause_min: 30              # Stop the export if still high after this many minutes
+  health_stop_retry_min: 60             # A scheduled run stopped that way tries once more after this (0 = next run)
   health_resume_drain_ratio: 0.7        # Resume once a signal falls to <= peak * this
   connection_failure_limit: 10          # Abort after this many consecutive connection failures
 ```
@@ -143,8 +144,14 @@ Signals and what makes each PAUSE the export:
   journal/buffer signal fallen to `<=` its pause-time peak × `health_resume_drain_ratio`
   (0.7 → dropped ≥ 30 % from the peak). i.e. it must actually come back down, not
   just stop climbing.
-- **Give up:** if load stays high for `health_max_pause_min` (30 min) the export
-  stops with an error and sends a notification.
+- **Give up:** if load stays high for `health_max_pause_min` (30 min) the run
+  ends there — once, not chunk by chunk or index by index. Every hour already
+  archived stays archived and the open hour is discarded, so the next run
+  continues from it. A scheduled run then tries **once** more after
+  `health_stop_retry_min` (60 min) — retrying a minute later only meets the same
+  load — and otherwise leaves the rest to its next scheduled run. One
+  notification either way; the job row says how many records were archived
+  before the stop.
 - **Circuit breaker:** `connection_failure_limit` (10) consecutive connection
   failures aborts the run instead of hammering a dead server.
 - **Fail-safe:** if Graylog can't be read — exactly when it may be in trouble —

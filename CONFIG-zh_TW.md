@@ -96,6 +96,7 @@ export:
   health_buffer_min_delta: 64           # buffer 每次成長 >= 此值才算上升
   health_pause_interval_sec: 15         # 暫停時多久重讀一次
   health_max_pause_min: 30              # 高負載持續超過此分鐘數即停止匯出
+  health_stop_retry_min: 60             # 排程因此停止時，隔這麼久再試一次（0＝等下一次排程）
   health_resume_drain_ratio: 0.7        # 訊號回落到 峰值 × 此比例 以下才恢復
   connection_failure_limit: 10          # 連續連線失敗達此次數即中止
 ```
@@ -136,7 +137,10 @@ export:
 - **恢復**需：heap `<` 門檻、沒有任何訊號在上升，且每個 journal／buffer 訊號都回落到
   暫停期間峰值 × `health_resume_drain_ratio`（0.7 → 從峰值退 ≥ 30%）以下。也就是必須真的
   降下來，不是只停止上升。
-- **放棄**：高負載持續 `health_max_pause_min`（30 分鐘）未降，匯出即以錯誤停止並發通知。
+- **放棄**：高負載持續 `health_max_pause_min`（30 分鐘）未降，這次執行就在這裡結束，而且只停一次，
+  不會一個區段、一個 index 地重來。已封存的每個小時都保留，正在寫的那一小時會丟棄，下次從那裡接續。
+  排程執行會在 `health_stop_retry_min`（60 分鐘）後**再試一次**（1 分鐘後就重試只會碰到同樣的負載），
+  還是不行就留給下一次排程。不論哪種情況都只發一則通知，作業紀錄會寫明停止前已封存多少筆。
 - **斷路器**：`connection_failure_limit`（10）次連續連線失敗即中止，不再對死掉的伺服器猛打。
 - **fail-safe**：讀不到 Graylog（正是它可能出狀況的當下）視為有壓力並暫停，**不會**把
   「讀不到」當成健康。
