@@ -24,7 +24,7 @@ install_report_deps() {
     local pip_flags="$1"
     local bundle_dir="$2"
     local service_user="jt-glogarch"
-    local install_dir="/opt/jt-glogarch"
+    local install_dir="${JT_INSTALL_DIR:-/opt/jt-glogarch}"
     local browsers_dir="$install_dir/.playwright"
 
     echo ""
@@ -56,9 +56,16 @@ install_report_deps() {
     fi
 
     # --- 2. Chromium browser into the shared, service-readable path ---
+    # Present means the revision THIS Playwright needs, not just any Chromium:
+    # an upgrade that brings a newer Playwright (the --ignore-installed path
+    # above installs the latest) needs a newer browser build, and "chromium-1228
+    # exists, skip" left a customer with "Executable doesn't exist at
+    # .../chromium_headless_shell-1243/...".
     mkdir -p "$browsers_dir"
-    if ls -d "$browsers_dir"/chromium-*/ >/dev/null 2>&1; then
-        echo "  [chromium] already present in $browsers_dir — skip."
+    local missing
+    missing=$(_report_browser_dirs_missing "$browsers_dir")
+    if [ -z "$missing" ] && _report_browser_dirs_known "$browsers_dir"; then
+        echo "  [chromium] the build this Playwright needs is already in $browsers_dir — skip."
     elif [ -n "$bundle_dir" ]; then
         local tb
         tb=$(ls "$bundle_dir"/chromium-*.tar.gz 2>/dev/null | head -1)
@@ -82,9 +89,63 @@ install_report_deps() {
         fi
     fi
 
+    # Builds an older Playwright needed are dead weight (~300 MB each) once the
+    # required one is present; never remove anything before that.
+    if [ -z "$(_report_browser_dirs_missing "$browsers_dir")" ] && _report_browser_dirs_known "$browsers_dir"; then
+        _report_prune_stale_browsers "$browsers_dir"
+    fi
+
     # The service reads Chromium as jt-glogarch; hand ownership over.
     chown -R "$service_user":"$service_user" "$browsers_dir" 2>/dev/null || true
     echo "=== Reports deps step complete ==="
+}
+
+# These helpers run inside install.sh / upgrade.sh, which use `set -e`: each one
+# must end with status 0 except _report_browser_dirs_known (only ever used as an
+# `if` condition). A helper whose last test happened to be false aborted the
+# whole upgrade between installing the new code and restarting the service.
+
+# Browser directories the INSTALLED Playwright expects under $1 (one per line),
+# from its own `install --dry-run`. Empty when Playwright is missing or too old
+# to answer — callers treat that as "unknown", never as "present".
+_report_browser_dirs_needed() {
+    local browsers_dir="$1"
+    { PLAYWRIGHT_BROWSERS_PATH="$browsers_dir" python3 -m playwright install --dry-run chromium 2>/dev/null \
+        | sed -n 's/^ *Install location: *//p' | sort -u; } || true
+    return 0
+}
+
+_report_browser_dirs_known() {
+    [ -n "$(_report_browser_dirs_needed "$1")" ]
+}
+
+_report_browser_dirs_missing() {
+    local d
+    while read -r d; do
+        if [ -n "$d" ] && [ ! -d "$d" ]; then
+            echo "$d"
+        fi
+    done <<EOF_NEEDED
+$(_report_browser_dirs_needed "$1")
+EOF_NEEDED
+    return 0
+}
+
+_report_prune_stale_browsers() {
+    local browsers_dir="$1" d keep
+    keep=$(_report_browser_dirs_needed "$browsers_dir")
+    [ -n "$keep" ] || return 0
+    # Never remove a build before every one this Playwright needs is in place.
+    [ -z "$(_report_browser_dirs_missing "$browsers_dir")" ] || return 0
+    for d in "$browsers_dir"/chromium-* "$browsers_dir"/chromium_headless_shell-*; do
+        [ -d "$d" ] || continue
+        if ! printf '%s\n' "$keep" | grep -qxF "$d"; then
+            if rm -rf "$d"; then
+                echo "  [chromium] removed $(basename "$d") — this Playwright no longer uses it."
+            fi
+        fi
+    done
+    return 0
 }
 
 # --- Verify the render engine actually WORKS ------------------------------
@@ -103,7 +164,7 @@ install_report_deps() {
 #   verify_report_engine        -> 0 = renders, 1 = does not (never fatal)
 verify_report_engine() {
     local service_user="jt-glogarch"
-    local install_dir="/opt/jt-glogarch"
+    local install_dir="${JT_INSTALL_DIR:-/opt/jt-glogarch}"
     local browsers_dir="$install_dir/.playwright"
     local out rc
 
@@ -163,6 +224,21 @@ PYEOF
             | grep -iE 'error|missing|cannot|failed|shared librar' | head -6)
     [ -z "$why" ] && why=$(echo "$out" | tail -6)
     echo "$why" | sed 's/^/    /'
+
+    # A Chromium is there but not the build this Playwright launches (an upgrade
+    # brought a newer Playwright): say exactly which, and the one-line fix.
+    local need
+    need=$(_report_browser_dirs_missing "$browsers_dir")
+    if [ -n "$need" ]; then
+        echo ""
+        echo "  This Playwright needs a browser build that is not installed:"
+        echo "$need" | sed 's/^/    /'
+        echo "  Online hosts fix it with:"
+        echo "    sudo PLAYWRIGHT_BROWSERS_PATH=$browsers_dir python3 -m playwright install chromium"
+        echo "    sudo chown -R $service_user:$service_user $browsers_dir"
+        echo "  Air-gapped hosts: upgrade with an offline bundle built for this version."
+        return 1
+    fi
 
     # Name the missing OS libraries — the actionable part on an air-gapped box.
     # Playwright's layout moves around (chrome-linux/ vs chrome-linux64/, plus a

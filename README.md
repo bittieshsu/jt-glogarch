@@ -1,4 +1,4 @@
-# jt-glogarch v1.16.1
+# jt-glogarch v1.16.2
 
 **Language**: **English** | [繁體中文](README-zh_TW.md) | [日本語](README-ja.md)  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Archive & restore logs for Graylog Open (6.x / 7.x)
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.16.1-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.16.2-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open does not include the Archive feature available in the Enterprise edition.
@@ -1432,6 +1432,24 @@ sudo -u jt-glogarch glogarch -c /opt/jt-glogarch/config.yaml import \
 
 
 ## Troubleshooting / FAQ
+
+### After an upgrade, PDF reports fail: "Executable doesn't exist at …/chromium_headless_shell-NNNN/…"
+
+Only PDF reports are affected; archiving, restore and everything else keep working. The
+upgrade installed a newer Playwright that needs a newer Chromium build than the one in
+`/opt/jt-glogarch/.playwright/` (e.g. `chromium-1228` present, `…-1243` needed). Before
+v1.16.2 the upgrade saw "a Chromium is there" and skipped it; since v1.16.2 it checks for
+the exact build and downloads it. To fix it now on a host with internet access:
+
+```bash
+sudo PLAYWRIGHT_BROWSERS_PATH=/opt/jt-glogarch/.playwright python3 -m playwright install chromium
+sudo chown -R jt-glogarch:jt-glogarch /opt/jt-glogarch/.playwright
+sudo bash -c 'source /opt/jt-glogarch/deploy/report-deps.sh && verify_report_engine'
+```
+
+No restart is needed. An air-gapped host upgrades with an offline bundle built for the new
+version, which carries the matching Chromium.
+
 
 
 ### Cleanup deletes far earlier than my retention setting — or the disk fills up

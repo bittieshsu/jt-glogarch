@@ -1,4 +1,4 @@
-# jt-glogarch v1.16.1
+# jt-glogarch v1.16.2
 
 **語言**： [English](README.md) | **繁體中文** | [日本語](README-ja.md)  
 **網站**： <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Graylog Open (6.x / 7.x) 的記錄歸檔與還原工具
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.16.1-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.16.2-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open 版本不支援 Enterprise 版的 Archive 功能。
@@ -1308,6 +1308,22 @@ sudo -u jt-glogarch glogarch import \
 
 
 ## 疑難排解 / 常見問題
+
+### 升級後 PDF 報表失敗：「Executable doesn't exist at …/chromium_headless_shell-NNNN/…」
+
+只有 PDF 報表受影響，歸檔、還原與其他功能都照常運作。升級時裝上了較新的 Playwright，它需要的
+Chromium 版本比 `/opt/jt-glogarch/.playwright/` 裡的新（例如現有 `chromium-1228`，需要 `…-1243`）。
+v1.16.2 以前，升級只看到「已經有 Chromium」就跳過；v1.16.2 起會檢查確切版本並自動下載。連得上網路的
+主機現在可以這樣修正：
+
+```bash
+sudo PLAYWRIGHT_BROWSERS_PATH=/opt/jt-glogarch/.playwright python3 -m playwright install chromium
+sudo chown -R jt-glogarch:jt-glogarch /opt/jt-glogarch/.playwright
+sudo bash -c 'source /opt/jt-glogarch/deploy/report-deps.sh && verify_report_engine'
+```
+
+不需要重新啟動服務。無法連網的主機，請用為新版本製作的離線安裝包升級，裡面附有相符的 Chromium。
+
 
 ### 清理作業遠比我設定的保留期更早刪除資料——或是磁碟被塞爆
 

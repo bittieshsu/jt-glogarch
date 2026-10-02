@@ -443,6 +443,42 @@ async def main():
         check("no JS errors in the job-list refresh / stale-cancel flow", len(errs) == n3,
               "; ".join(errs[n3:])[:200])
 
+        # 7b) backend messages are shown in the UI language. A customer saw
+        # "錯誤：Preflight aborted: ... No GELF input found ..." in the Chinese UI:
+        # the server writes job notes in English and the page printed them as-is.
+        n7 = len(errs)
+        note = ("Preflight aborted: Target health check failed: No GELF input found on "
+                "target Graylog port 32202. Create a GELF TCP/UDP input on this port or "
+                "change the GELF Port in the import dialog.")
+
+        async def _route_note(route):
+            item = {"id": "uisim-job-0002", "job_type": "import", "status": "failed",
+                    "progress_pct": 0, "messages_done": 0, "messages_total": 1119089,
+                    "error_message": note, "source": "manual:gelf",
+                    "started_at": "2026-10-02T01:00:00", "completed_at": "2026-10-02T01:00:05",
+                    "phase": "", "current_detail": ""}
+            await route.fulfill(status=200, content_type="application/json",
+                                body=json.dumps({"items": [item]}))
+
+        await pg.route("**/api/jobs?*", _route_note)
+        shown = {}
+        for lang in ("zh-TW", "ja", "en"):
+            await pg.evaluate(f"setLang('{lang}')")
+            await pg.goto(f"{BASE}/jobs", wait_until="networkidle")
+            await pg.wait_for_timeout(800)
+            shown[lang] = await pg.evaluate("() => (document.querySelector('#jobs-table tbody') || {}).innerText || ''")
+        await pg.unroute("**/api/jobs?*")
+        check("a job note written in English shows in Chinese in the Chinese UI",
+              "匯入前檢查中止" in shown["zh-TW"] and "找不到 GELF input" in shown["zh-TW"]
+              and "Preflight aborted" not in shown["zh-TW"], shown["zh-TW"][:160])
+        check("... in Japanese in the Japanese UI",
+              "インポート前チェックを中止しました" in shown["ja"] and "Preflight aborted" not in shown["ja"],
+              shown["ja"][:160])
+        check("... and stays English in the English UI", "Preflight aborted" in shown["en"],
+              shown["en"][:160])
+        check("no JS errors while translating job notes", len(errs) == n7, "; ".join(errs[n7:])[:200])
+        await pg.evaluate("setLang('en')")
+
         # 8) editing a schedule through the real dialog keeps it DISABLED and keeps
         # its server. The edit form has no enabled switch; saving used to switch
         # a schedule another admin had disabled back on, and dropped the server.

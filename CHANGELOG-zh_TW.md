@@ -2,6 +2,38 @@
 
 jt-glogarch 所有重要變更皆記錄於此檔案。
 
+## [1.16.2] - 2026-10-02
+
+### 修正
+
+- **中文與日文介面上，伺服器傳來的訊息仍是英文。** 客戶在匯入對話框看到「錯誤：Preflight aborted:
+  Target health check failed: No GELF input found on target Graylog port 32202 …」。伺服器寫的作業
+  備註、拒絕原因與錯誤訊息都是英文（作業紀錄只寫一次，卻由使用不同語言的管理員查看），而頁面原樣
+  顯示。現在介面會翻譯這些訊息：後端會寫出的 193 個句子，都以 `srv_*` key 放在 `i18n.js`，並附上繁體
+  中文與日文。涵蓋範圍：匯入前檢查與匯入結果、匯出／OpenSearch 直連的作業備註、反壓暫停與停止的說明、
+  驗證／清理的備註、「Interrupted by service restart」，以及 Web API 的拒絕原因和輸入檢查錯誤。
+  `trSrv()` 也能翻譯由多個句子組成（以「. 」「; 」「 | 」串接）的備註和巢狀訊息，認不得的內容則維持
+  原樣。API 回傳的 `error`／警告在 `fetchJSON()` 統一翻譯一次；作業備註與進度說明則在顯示時才翻譯
+  （列的顏色判斷仍然讀英文原文）。主介面與初始設定精靈都已套用。
+- **升級後 PDF 報表可能無法產生：「Executable doesn't exist at …/chromium_headless_shell-1243/…」。**
+  升級裝上了較新的 Playwright（`--ignore-installed` 那條路徑會安裝最新版），它需要較新的 Chromium，
+  但 `report-deps.sh` 看到 `chromium-1228` 就印出「already present — skip」。現在會直接詢問已安裝的
+  Playwright 需要哪些瀏覽器目錄（`playwright install --dry-run chromium`），缺少時就安裝（離線則從
+  安裝包解壓）；只有在需要的版本已就位後，才移除不再使用的舊版；驗證失敗時會指出缺少哪一版，並附上
+  修正指令。只有 PDF 報表受影響。已經遇到的主機：請見 README 常見問題；或者下次升級時，因為會執行新的
+  `report-deps.sh`，也會自動修好。
+
+### 測試
+
+- `tests/test_srv_messages.py`（7 項）：每個 `srv_*` 英文句型仍存在於後端程式碼中（後端改了字，建置
+  就會失敗，不會無聲地退回英文）；每種語言都保留所有佔位；每個句型填入範例值後，都能透過真正的
+  `i18n.js`（`scripts/js-srv-msg-check.js`，node）翻成兩種語言；真實的組合備註都能翻譯；認不得的
+  文字與英文模式維持原樣；介面確實把伺服器文字交給翻譯函式。
+- `ui-sim-test.py` 第 7b 步：在真的瀏覽器裡，英文的作業備註會分別顯示成中文、日文，英文介面則維持英文。
+- `tests/test_report_deps_browser_build.py`（4 項）：用替身 Playwright 執行真正的 `report-deps.sh`：舊版
+  不會被當成需要的版本、需要的版本已存在時會跳過、下載失敗時不會刪除任何東西、不再只靠目錄名稱判斷。並在
+  log4 用真正的 Playwright 重現：舊版 → 安裝正確版本並產生 PDF；驗證會指出缺少的版本與修正方式。
+
 ## [1.16.1] - 2026-10-02
 
 ### 修正

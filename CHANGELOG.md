@@ -2,6 +2,51 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.16.2] - 2026-10-02
+
+### Fixed
+
+- **Server messages appeared in English in the Chinese and Japanese UI.** A customer
+  saw "錯誤：Preflight aborted: Target health check failed: No GELF input found on
+  target Graylog port 32202 …" in the import dialog. The server writes job notes,
+  refusals and errors in English — a job row is stored once and read by
+  administrators in different languages — and the page printed them as they came.
+  The UI now translates them: 193 sentences the backend writes (import preflight
+  checks and results, export / OpenSearch-direct job notes, backpressure pause and
+  stop details, verify / cleanup notes, "Interrupted by service restart", and the
+  Web API's refusals and validation errors) are in `i18n.js` as `srv_*` keys with
+  their zh-TW and ja text. `trSrv()` also translates notes built from several of
+  them (". ", "; ", " | ") and nested messages, and leaves anything it does not
+  recognise unchanged. API `error` / warnings are translated once in
+  `fetchJSON()`; job notes and progress details where they are displayed (the row
+  colouring still reads the English). Applied on the main UI and the setup wizard.
+- **An upgrade could leave PDF reports broken: "Executable doesn't exist at
+  …/chromium_headless_shell-1243/…".** The upgrade brought a newer Playwright (the
+  `--ignore-installed` path installs the latest) that needs a newer Chromium build,
+  but `report-deps.sh` saw `chromium-1228` and printed "already present — skip".
+  It now asks the installed Playwright which build directories it needs
+  (`playwright install --dry-run chromium`), installs them when any is missing
+  (or extracts the offline bundle's), removes builds it no longer uses only once
+  the needed one is present, and the render check names the missing build with the
+  exact fix commands. Only PDF reports were affected. Hosts already hit: see the
+  README FAQ — or the next upgrade fixes it, since it runs the new `report-deps.sh`.
+
+### Tests
+
+- `tests/test_srv_messages.py` (7): every `srv_*` English template still exists in
+  the backend source (a reworded message fails the build instead of silently
+  showing English), placeholders kept in every language, every template filled
+  with sample values translates in both languages through the REAL `i18n.js`
+  (`scripts/js-srv-msg-check.js`, node), real composite job notes translate, unknown
+  text and English are left alone, and the UI routes server text through it.
+- `ui-sim-test.py` step 7b: a job note in English shows in Chinese, in Japanese,
+  and stays English, in a real browser.
+- `tests/test_report_deps_browser_build.py` (4): the real `report-deps.sh` with a
+  stand-in Playwright — an older build is not taken for the needed one, the needed
+  build present is skipped, a failed download removes nothing, no presence check by
+  directory name. Reproduced on log4 with the real Playwright: stale build ->
+  installed, rendered a PDF; verify names the missing build and the fix.
+
 ## [1.16.1] - 2026-10-02
 
 ### Fixed

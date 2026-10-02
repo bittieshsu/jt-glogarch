@@ -802,6 +802,21 @@ failure.
       retries for other errors. Against a real Graylog (.83): a forced stop ends
       after one pause with the "stay archived" summary.
 
+### Server messages in the UI language (v1.16.2)
+
+- [ ] **Translated, not printed raw** (`tests/test_srv_messages.py`): every `srv_*`
+      English template exists in the backend source; zh-TW / ja keep every
+      placeholder; every template translates in both languages through the real
+      `i18n.js`; real composite job notes translate; unknown text and the English UI
+      are unchanged; `fetchJSON()`, job notes and the setup wizard go through it.
+- [ ] **In a browser** (`ui-sim-test.py` step 7b): an English job note shows in
+      Chinese / Japanese / English with the UI language.
+- [ ] A NEW user-facing backend message gets its `srv_*` key in all three blocks in
+      the same change (otherwise it shows in English).
+- [ ] **Upgrades install the Chromium build the installed Playwright needs**
+      (`tests/test_report_deps_browser_build.py`); after an upgrade that changed the
+      Playwright version, `verify_report_engine` passes on the staging box.
+
 ### Test Results
 
 - [ ] `./scripts/run-tests.sh` passes — `TEST-RESULTS.md` generated

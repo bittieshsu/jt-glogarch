@@ -1,4 +1,4 @@
-# jt-glogarch v1.16.1
+# jt-glogarch v1.16.2
 
 **Language**: [English](README.md) | [繁體中文](README-zh_TW.md) | **日本語**  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Graylog Open（6.x / 7.x）向けのログのアーカイブ・リストアツール
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.16.1-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.16.2-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 > **作者：** Jason Cheng（[Jason Tools](https://github.com/jasoncheng7115)）
@@ -766,6 +766,24 @@ Graylog の保持期間内のデータにアクセスしたい場合。
 ---
 
 ## FAQ
+
+### アップグレード後に PDF レポートが失敗する：「Executable doesn't exist at …/chromium_headless_shell-NNNN/…」
+
+影響を受けるのは PDF レポートだけで、アーカイブ、リストア、その他の機能は通常どおり動作します。アップグレード
+で新しい Playwright がインストールされ、`/opt/jt-glogarch/.playwright/` にあるものより新しい Chromium が必要に
+なっています（例：`chromium-1228` があり、`…-1243` が必要）。v1.16.2 より前のアップグレードは「Chromium が
+ある」と判断して処理を飛ばしていましたが、v1.16.2 からは必要なビルドを確認してダウンロードします。インター
+ネットに接続できるホストでは、次の手順ですぐに直せます。
+
+```bash
+sudo PLAYWRIGHT_BROWSERS_PATH=/opt/jt-glogarch/.playwright python3 -m playwright install chromium
+sudo chown -R jt-glogarch:jt-glogarch /opt/jt-glogarch/.playwright
+sudo bash -c 'source /opt/jt-glogarch/deploy/report-deps.sh && verify_report_engine'
+```
+
+サービスの再起動は不要です。インターネットに接続できないホストは、新しいバージョン用に作成したオフライン
+バンドル（対応する Chromium を含む）でアップグレードしてください。
+
 
 ### 工場出荷状態に戻す（再初期化する）には？
 

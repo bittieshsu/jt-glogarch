@@ -55,6 +55,8 @@ async function api(path, body, method) {
     let data = {};
     try { data = await resp.json(); } catch (e) {}
     if (!resp.ok && !data.error) data.error = `HTTP ${resp.status}`;
+    // Server refusals are English; show them in the wizard's language.
+    if (typeof data.error === 'string' && typeof trSrv === 'function') data.error = trSrv(data.error);
     return data;
 }
 

@@ -14,10 +14,27 @@ async function fetchJSON(url, opts) {
         if (!resp.ok && !data.error) {
             data.error = data.error || `HTTP ${resp.status}: ${resp.statusText}`;
         }
+        _localizeServerText(data);
         return data;
     } catch (e) {
         return {error: `HTTP ${resp.status}: ${resp.statusText}`};
     }
+}
+
+// Refusals, errors and warnings come back in English (see trSrv in i18n.js).
+// Translate them here, once, for every caller. Job rows are NOT touched: their
+// error_message/current_detail are matched against English elsewhere (row
+// colour), so those are translated where they are displayed — jobNote().
+function _localizeServerText(data) {
+    if (!data || typeof data !== 'object' || typeof trSrv !== 'function') return;
+    if (typeof data.error === 'string') data.error = trSrv(data.error);
+    for (const k of ['warnings', 'notices', 'errors', 'capacity_warnings']) {
+        if (Array.isArray(data[k])) data[k] = data[k].map(v => typeof v === 'string' ? trSrv(v) : v);
+    }
+}
+
+function jobNote(text) {
+    return typeof trSrv === 'function' ? trSrv(text || '') : (text || '');
 }
 
 // --- UI Helpers ---
@@ -2898,7 +2915,7 @@ async function startExport() {
                     const text = document.getElementById('export-progress-text');
                     if (bar) bar.style.width = '100%';
                     if (job.status === 'failed') {
-                        if (text) text.innerHTML = `<span class="status-failed">${t('progress_error')}${esc(job.error_message || '')}</span>`;
+                        if (text) text.innerHTML = `<span class="status-failed">${t('progress_error')}${esc(jobNote(job.error_message))}</span>`;
                     } else if ((job.messages_done || 0) === 0) {
                         if (text) text.innerHTML = `<span class="u030">${t('export_no_data')}</span>`;
                     } else {
@@ -2983,18 +3000,18 @@ async function loadJobs() {
         return `<tr class="${j.status === 'completed' && j.messages_done === 0 ? 'job-row-dim' : ''}">
             <td title="${j.id}">${j.id.substring(0, 8)}</td>
             <td>${j.job_type} ${srcHtml}</td>
-            <td>${statusBadge(j.status)}${jobPausedLabel(j) ? `<div class="job-paused" title="${esc(j.current_detail || '')}">⏸ ${esc(jobPausedLabel(j))}</div>` : ''}</td>
+            <td>${statusBadge(j.status)}${jobPausedLabel(j) ? `<div class="job-paused" title="${esc(jobNote(j.current_detail))}">⏸ ${esc(jobPausedLabel(j))}</div>` : ''}</td>
             <td class="u149">
                 <div class="progress-bar u155">
                     <div class="progress-fill" data-style="width:${j.progress_pct}%"></div>
                 </div> ${j.progress_pct.toFixed(0)}%
-                ${j.current_detail && j.status === 'running' ? `<div class="u074" title="${esc(j.current_detail)}">${esc(j.current_detail)}</div>` : ''}
+                ${j.current_detail && j.status === 'running' ? `<div class="u074" title="${esc(jobNote(j.current_detail))}">${esc(jobNote(j.current_detail))}</div>` : ''}
             </td>
             <td class="u147">${recordsHtml}</td>
             <td>${formatDT(j.started_at)}</td>
             <td>${formatDT(j.completed_at)}</td>
             <td>${elapsedWithEta(j)}</td>
-            <td data-style="color:${j.status === 'failed' || (j.error_message || '').indexOf('Compliance violation') !== -1 || (j.error_message || '').indexOf('Interrupted') !== -1 ? 'var(--danger)' : (j.error_message || '').indexOf('Skipped') !== -1 ? 'var(--text-muted)' : 'var(--text-muted)'};font-size:0.85em;max-width:220px;overflow:hidden;text-overflow:ellipsis" title="${esc(j.error_message || '')}">${coverageChip(j)}${esc(j.error_message || '')}</td>
+            <td data-style="color:${j.status === 'failed' || (j.error_message || '').indexOf('Compliance violation') !== -1 || (j.error_message || '').indexOf('Interrupted') !== -1 ? 'var(--danger)' : (j.error_message || '').indexOf('Skipped') !== -1 ? 'var(--text-muted)' : 'var(--text-muted)'};font-size:0.85em;max-width:220px;overflow:hidden;text-overflow:ellipsis" title="${esc(jobNote(j.error_message))}">${coverageChip(j)}${esc(jobNote(j.error_message))}</td>
             <td>${cancelBtn}${retryBtn}</td>
         </tr>`;
     }).join('');
@@ -3063,7 +3080,7 @@ async function cancelJob(jobId) {
     ];
     const paused = jobPausedLabel(j);
     if (paused) rows.push(['⏸', esc(paused)]);
-    if (j.current_detail) rows.push(['', esc(j.current_detail)]);
+    if (j.current_detail) rows.push(['', esc(jobNote(j.current_detail))]);
     const table = `<table class="cancel-live">${rows.map(([k, v]) =>
         `<tr><td>${esc(k)}</td><td>${v}</td></tr>`).join('')}</table>`;
     showConfirm(
@@ -3177,7 +3194,7 @@ async function loadSchedules() {
             const pct = runningJob.progress_pct?.toFixed(0) || 0;
             const msgs = formatNumber(runningJob.messages_done || 0);
             const elapsed = formatElapsed(runningJob.started_at);
-            const detail = runningJob.current_detail || '';
+            const detail = jobNote(runningJob.current_detail);
             const statsLine = runningJob.messages_done ? `${pct}% ${msgs} ${elapsed}` : `${pct}% ${elapsed}`;
             runningHtml = `<div class="u112">
                 <div class="progress-bar u096">
@@ -3544,11 +3561,11 @@ function watchJob(jobId, type, onComplete) {
             if (cancelled) {
                 let html = `<span class="status-cancelled">${t('status_cancelled')} (${formatNumber(msgs)} ${t('unit_records')})</span>`;
                 if (job.error_message) {
-                    html += `<div data-style="margin-top:8px;padding:8px 10px;background:rgba(108,99,255,0.08);border-left:3px solid var(--text-dim);border-radius:4px;font-size:0.85em">${esc(job.error_message)}</div>`;
+                    html += `<div data-style="margin-top:8px;padding:8px 10px;background:rgba(108,99,255,0.08);border-left:3px solid var(--text-dim);border-radius:4px;font-size:0.85em">${esc(jobNote(job.error_message))}</div>`;
                 }
                 text.innerHTML = html;
             } else if (job.status === 'failed' || job.phase === 'error') {
-                text.innerHTML = `<span class="status-failed">${t('progress_error')}${esc(job.error_message || job.error || '')}</span>`;
+                text.innerHTML = `<span class="status-failed">${t('progress_error')}${esc(jobNote(job.error_message || job.error))}</span>`;
             } else if (msgs === 0) {
                 text.innerHTML = `<span class="u030">${t('export_no_data')}</span>`;
             } else {
@@ -3567,7 +3584,7 @@ function watchJob(jobId, type, onComplete) {
                 if (job.error_message) {
                     const isViolation = job.error_message.indexOf('Compliance violation') !== -1;
                     const colour = isViolation ? 'var(--warning)' : 'var(--accent)';
-                    html += `<div data-style="margin-top:8px;padding:8px 10px;background:rgba(108,99,255,0.08);border-left:3px solid ${colour};border-radius:4px;font-size:0.85em">${esc(job.error_message)}</div>`;
+                    html += `<div data-style="margin-top:8px;padding:8px 10px;background:rgba(108,99,255,0.08);border-left:3px solid ${colour};border-radius:4px;font-size:0.85em">${esc(jobNote(job.error_message))}</div>`;
                 }
                 text.innerHTML = html;
             }
@@ -3589,10 +3606,10 @@ function watchJob(jobId, type, onComplete) {
         if (data.phase === 'cancelling') {
             // Cancel acknowledged; the exporter is finishing its current batch
             // and will publish the real final state. Keep the bar, say so.
-            if (text) text.textContent = data.detail || '';
+            if (text) text.textContent = jobNote(data.detail);
             return;
         }
-        renderProgress(data.pct, data.messages_done, data.messages_total, data.index, data.detail, data.phase);
+        renderProgress(data.pct, data.messages_done, data.messages_total, data.index, jobNote(data.detail), data.phase);
     });
     // Heartbeat: the server sends these while a running import is paused on
     // backpressure (no message progress for minutes). Just keep the stream
@@ -3657,7 +3674,7 @@ function watchJob(jobId, type, onComplete) {
                 // NOT gated on sseOk, so a stalled or dropped SSE stream can never
                 // freeze the bar. renderProgress keeps it monotonic vs the SSE.
                 renderProgress(job.progress_pct, job.messages_done, job.messages_total,
-                               job.index, job.current_detail, job.phase);
+                               job.index, jobNote(job.current_detail), job.phase);
             }
         } catch (e) {
             // Network error — stop after 30 attempts (1 min)
@@ -3726,7 +3743,7 @@ async function loadHistory() {
         <td class="u147">${formatRecords(j.messages_done, j.messages_total, j.job_type)}</td>
         <td>${formatDT(j.started_at)}</td>
         <td>${formatDT(j.completed_at)}</td>
-        <td data-style="color:${j.status === 'failed' || (j.error_message || '').indexOf('Compliance violation') !== -1 || (j.error_message || '').indexOf('Interrupted') !== -1 ? 'var(--danger)' : 'var(--text-muted)'};font-size:0.85em;max-width:220px;overflow:hidden;text-overflow:ellipsis" title="${esc(j.error_message || '')}">${coverageChip(j)}${esc(j.error_message || '')}</td>
+        <td data-style="color:${j.status === 'failed' || (j.error_message || '').indexOf('Compliance violation') !== -1 || (j.error_message || '').indexOf('Interrupted') !== -1 ? 'var(--danger)' : 'var(--text-muted)'};font-size:0.85em;max-width:220px;overflow:hidden;text-overflow:ellipsis" title="${esc(jobNote(j.error_message))}">${coverageChip(j)}${esc(jobNote(j.error_message))}</td>
     </tr>`).join('');
 }
 
@@ -4173,7 +4190,7 @@ async function checkRunningJobs() {
             const elapsed = formatElapsed(j.started_at);
             const msgs = j.messages_done ? formatNumber(j.messages_done) : '0';
             const total = j.messages_total ? formatNumber(j.messages_total) : '?';
-            const detail = j.current_detail || j.phase || '';
+            const detail = jobNote(j.current_detail) || j.phase || '';
             // A paused job must SAY paused even after it has processed records —
             // the counter freezes, so "170,691 / 377,835,339" alone looks stuck.
             const paused = jobPausedLabel(j);
@@ -5373,7 +5390,7 @@ function renderReportHistory(items) {
         <td>${esc(h.report_name)} ${h.triggered_by === 'scheduled' ? '<span class="job-badge job-badge-sched">' + t('job_scheduled') + '</span>' : '<span class="job-badge job-badge-manual">' + t('job_manual') + '</span>'}</td>
         <td class="text-muted fs-085">${esc(formatDT(h.created_at))}</td>
         <td>${h.status === 'completed' ? statusBadge('completed')
-              : statusBadge('failed') + (h.error ? ` <span class="text-danger fs-08">${esc((h.error || '').slice(0, 18))}${(h.error || '').length > 18 ? '…' : ''}</span> <span class="link-like fs-08" data-act="showAlert" data-arg="${esc(h.error)}">${t('reports_err_detail')}</span>` : '')}</td>
+              : statusBadge('failed') + (h.error ? ` <span class="text-danger fs-08">${esc(jobNote(h.error).slice(0, 18))}${jobNote(h.error).length > 18 ? '…' : ''}</span> <span class="link-like fs-08" data-act="showAlert" data-arg="${esc(h.error)}">${t('reports_err_detail')}</span>` : '')}</td>
         <td>${h.size_bytes ? formatBytes(h.size_bytes) : '-'}</td>
         <td>${h.sha256 ? `<code class="fp-hash" title="SHA-256: ${esc(h.sha256)}">${esc(h.sha256.slice(0,12))}…</code> <span class="link-like fs-08" data-act="showReportFingerprint" data-arg="${esc(h.sha256)}|${esc(h.filename||'')}">${t('reports_verify')}</span>` : '-'}</td>
         <td>${h.status === 'completed' && h.file_path ? `<a class="btn-sm btn-secondary" href="${API}/reports/history/${h.id}/download">${icon('download',14)} PDF</a>` : '-'}</td>

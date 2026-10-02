@@ -619,6 +619,16 @@ GL_PASS='<graylog-admin-密碼>' bash scripts/e2e-archive-test.sh
       其他錯誤仍維持快速重試。對真的 Graylog（.83）：強制停止時只暫停一次就結束，並附上「stay archived」
       摘要。
 
+### 伺服器訊息以介面語言顯示（v1.16.2）
+
+- [ ] **經過翻譯，不是原樣顯示**（`tests/test_srv_messages.py`）：每個 `srv_*` 英文句型都存在於後端
+      程式碼；繁中／日文保留所有佔位；每個句型都能透過真正的 `i18n.js` 翻成兩種語言；真實的組合備註
+      都能翻譯；認不得的文字與英文介面維持不變；`fetchJSON()`、作業備註與初始設定精靈都經過翻譯。
+- [ ] **在瀏覽器中**（`ui-sim-test.py` 第 7b 步）：英文的作業備註依介面語言顯示為中文／日文／英文。
+- [ ] 新增會顯示給使用者的後端訊息時，在同一次修改中把它的 `srv_*` key 加進三個語言區塊（否則會顯示英文）。
+- [ ] **升級會安裝已安裝 Playwright 所需的 Chromium 版本**（`tests/test_report_deps_browser_build.py`）；
+      在 Playwright 版本有變的升級之後，staging 上的 `verify_report_engine` 會通過。
+
 ### 測試結果
 
 - [ ] `./scripts/run-tests.sh` 通過 — `TEST-RESULTS.md` 已產生
