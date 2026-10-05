@@ -629,6 +629,14 @@ GL_PASS='<graylog-admin-密碼>' bash scripts/e2e-archive-test.sh
 - [ ] **升級會安裝已安裝 Playwright 所需的 Chromium 版本**（`tests/test_report_deps_browser_build.py`）；
       在 Playwright 版本有變的升級之後，staging 上的 `verify_report_engine` 會通過。
 
+### jt-glogarch 底下的作業系統大版本升級（v1.16.3）：修改升級流程時必跑
+
+- [ ] `bash scripts/os-upgrade-sim.sh` 印出 `RESULT: ALL PASS`（docker、ubuntu:24.04，模擬 22.04 → 24.04
+      之後執行真正的 `upgrade.sh`：出現 Python 變更說明、資料庫已備份、已為 3.12 重新安裝、服務健康、
+      每個排程都已註冊）。
+- [ ] `tests/test_os_upgrade_paths.py` 通過；完整測試在目前支援的最新 Ubuntu 的 Python 上也通過（在該容器中執行）。
+- [ ] `upgrade.sh` 中任何在重新安裝「之前」執行的新步驟，在已安裝的套件無法載入時（不同的 Python）也要能運作。
+
 ### 測試結果
 
 - [ ] `./scripts/run-tests.sh` 通過 — `TEST-RESULTS.md` 已產生

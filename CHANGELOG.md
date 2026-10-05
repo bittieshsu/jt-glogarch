@@ -2,6 +2,52 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.16.3] - 2026-10-05
+
+### Fixed
+
+- **After an OS release upgrade the first `upgrade.sh` ran without a database
+  backup, and did not say why it was reinstalling everything.** Ubuntu 22.04 →
+  24.04 moves `python3` from 3.10 to 3.12; everything pip installed for 3.10 —
+  jt-glogarch and all its dependencies — is invisible to 3.12, so the service
+  crash-loops with `No module named 'glogarch'` until `upgrade.sh` reinstalls it.
+  1.16.2's `upgrade.sh` did repair it (reproduced in a container), but its backup
+  step ran `python3 -m glogarch db-backup`, which cannot import on the new Python,
+  and printed "skip: db-backup not available in current version". Now:
+  - it says that `python3` changed from X to Y and that it will reinstall for Y;
+  - when the installed package cannot run its own `db-backup`, the database is
+    backed up with Python's `sqlite3` online-backup API (same file name, same
+    directory) instead of being skipped;
+  - the version probe runs from `/`, so a run started inside `/opt/jt-glogarch`
+    no longer reads the source tree;
+  - setuptools/wheel are installed first if the new Python lacks them;
+  - after the reinstall it says the old `/usr/local/lib/python3.X/` is unused.
+- **`upgrade-offline.sh` with a bundle built for another Python got as far as
+  installing jt-glogarch without its dependencies** (pip's error went into a
+  `| tail`), leaving a service that could not start. It now refuses before
+  changing anything and says to build the bundle on the host's Python (e.g. in
+  `docker run ubuntu:24.04` for 3.12).
+- README FAQ (all three languages): what to do after an OS upgrade.
+
+### Verified
+
+- `scripts/os-upgrade-sim.sh` (new, docker): an ubuntu:24.04 install whose packages
+  are moved to python3.10 — the state an OS upgrade leaves, with the service failing
+  `No module named 'glogarch'` — then the real `upgrade.sh`: Python-change notice,
+  database backed up and readable, reinstalled for 3.12, PDF engine renders, service
+  healthy, 3/3 schedules registered, data intact. Against 1.16.2's `upgrade.sh` the
+  same run fails on the missing backup and notice.
+- The full test suite on Ubuntu 24.04's Python 3.12: 830 passed, 21 skipped (no node
+  in the container), 2 failed only for lack of the `jt-glogarch` user — both pass
+  once it exists. Every module compiles with `SyntaxWarning` as an error.
+
+### Tests
+
+- `tests/test_os_upgrade_paths.py` (7): the Python-change notice, a backup that does
+  not need the installed package (and the exact heredoc really backs up a database),
+  the version probe off the source tree, setuptools before the build, the offline
+  Python check before any `pip install`, all deploy scripts valid bash.
+
 ## [1.16.2] - 2026-10-02
 
 ### Fixed

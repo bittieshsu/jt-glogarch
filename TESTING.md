@@ -817,6 +817,16 @@ failure.
       (`tests/test_report_deps_browser_build.py`); after an upgrade that changed the
       Playwright version, `verify_report_engine` passes on the staging box.
 
+### OS release upgrade under jt-glogarch (v1.16.3) — MANDATORY for upgrade-flow changes
+
+- [ ] `bash scripts/os-upgrade-sim.sh` prints `RESULT: ALL PASS` (docker, ubuntu:24.04,
+      the real `upgrade.sh` after a simulated 22.04 → 24.04: Python-change notice,
+      database backed up, reinstalled for 3.12, healthy, every schedule registered).
+- [ ] `tests/test_os_upgrade_paths.py` passes; the test suite also passes on the newest
+      supported Ubuntu's Python (run it in that container).
+- [ ] Any new step in `upgrade.sh` that runs BEFORE the reinstall works when the
+      installed package cannot be imported (a different Python).
+
 ### Test Results
 
 - [ ] `./scripts/run-tests.sh` passes — `TEST-RESULTS.md` generated

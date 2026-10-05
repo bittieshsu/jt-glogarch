@@ -1,4 +1,4 @@
-# jt-glogarch v1.16.2
+# jt-glogarch v1.16.3
 
 **Language**: [English](README.md) | [繁體中文](README-zh_TW.md) | **日本語**  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Graylog Open（6.x / 7.x）向けのログのアーカイブ・リストアツール
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.16.2-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.16.3-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 > **作者：** Jason Cheng（[Jason Tools](https://github.com/jasoncheng7115)）
@@ -766,6 +766,27 @@ Graylog の保持期間内のデータにアクセスしたい場合。
 ---
 
 ## FAQ
+
+### OS をアップグレード（例：Ubuntu 22.04 → 24.04）した後、サービスが再起動を繰り返す
+
+`journalctl -u jt-glogarch` に `ModuleNotFoundError: No module named 'glogarch'`（または `fastapi`、
+`click` など）と表示されます。OS のメジャーアップグレードで `python3` が変わり（22.04 は 3.10、24.04 は
+3.12）、古い Python 用に pip でインストールしたものはすべて新しい Python から見えなくなります。アーカイブ、
+データベース、設定は変更されておらず、データは失われていませんが、新しい Python 用に再インストールするまで
+サービスは起動できません。OS のアップグレード（と再起動）の**後に**、通常のアップグレードを 1 回実行して
+ください。
+
+```bash
+sudo bash /opt/jt-glogarch/deploy/upgrade.sh
+```
+
+Python が変わったことを表示し、まずデータベースをバックアップしてから、jt-glogarch とすべての依存パッケージ
+（PDF レポート用のブラウザーを含む）を新しい Python 用に再インストールし、サービスを再起動して、正常に
+動作していることとすべてのスケジュールが登録されていることを確認します。その後
+`/usr/local/lib/python3.10/` は使われなくなります。**インターネットに接続できない**ホストには、現在の
+ホストと同じ Python で作成したオフラインバンドルが必要です（例：3.12 用は `docker run ubuntu:24.04` の中で
+作成）。古い Python 用のバンドルは、何も変更しないうちに拒否されます。
+
 
 ### アップグレード後に PDF レポートが失敗する：「Executable doesn't exist at …/chromium_headless_shell-NNNN/…」
 

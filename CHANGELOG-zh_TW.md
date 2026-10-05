@@ -2,6 +2,42 @@
 
 jt-glogarch 所有重要變更皆記錄於此檔案。
 
+## [1.16.3] - 2026-10-05
+
+### 修正
+
+- **作業系統大版本升級後，第一次執行 `upgrade.sh` 沒有備份資料庫，也沒有說明為什麼要全部重裝。**
+  Ubuntu 22.04 → 24.04 會把 `python3` 從 3.10 換成 3.12；之前 pip 為 3.10 安裝的一切（jt-glogarch
+  與所有相依套件），3.12 都看不到，所以在 `upgrade.sh` 重新安裝之前，服務會一直因
+  `No module named 'glogarch'` 而重新啟動。1.16.2 的 `upgrade.sh` 其實修得好（已在容器中重現），但它的
+  備份步驟執行的是 `python3 -m glogarch db-backup`，在新的 Python 上無法載入，於是印出「skip: db-backup
+  not available in current version」就跳過了。現在：
+  - 會說明 `python3` 已從 X 換成 Y，並將為 Y 重新安裝；
+  - 已安裝的套件無法執行自己的 `db-backup` 時，改用 Python 內建 `sqlite3` 的線上備份 API 備份資料庫
+    （相同檔名、相同目錄），不再跳過；
+  - 偵測版本時改從 `/` 執行，在 `/opt/jt-glogarch` 底下執行時不會再讀到原始碼；
+  - 新的 Python 若缺少 setuptools／wheel，會先安裝；
+  - 重新安裝完成後，會說明舊的 `/usr/local/lib/python3.X/` 已不再使用。
+- **`upgrade-offline.sh` 拿到為其他 Python 版本製作的安裝包時，會一路裝到「jt-glogarch 裝好了，相依套件
+  卻沒裝」**（pip 的錯誤被 `| tail` 吃掉），留下無法啟動的服務。現在會在改動任何東西之前就拒絕，並說明
+  要用主機的 Python 版本製作安裝包（例如在 `docker run ubuntu:24.04` 裡製作 3.12 版）。
+- README 常見問題（三種語言）：作業系統升級後該怎麼做。
+
+### 驗證
+
+- `scripts/os-upgrade-sim.sh`（新增，docker）：在 ubuntu:24.04 正常安裝後，把套件搬到 python3.10 底下，
+  重現作業系統升級後的狀態（服務因 `No module named 'glogarch'` 無法啟動），再執行真正的 `upgrade.sh`：
+  出現 Python 變更說明、資料庫已備份且可讀取、已為 3.12 重新安裝、PDF 引擎可產生 PDF、服務健康、
+  3/3 排程已註冊、資料完整。換成 1.16.2 的 `upgrade.sh` 跑同一個流程，會因為沒有備份、沒有說明而失敗。
+- 在 Ubuntu 24.04 的 Python 3.12 上跑完整測試：830 項通過、21 項略過（容器裡沒有 node），2 項失敗只是
+  因為缺少 `jt-glogarch` 使用者，建立後即通過。所有模組在「SyntaxWarning 視為錯誤」下都能編譯。
+
+### 測試
+
+- `tests/test_os_upgrade_paths.py`（7 項）：Python 變更說明、不需已安裝套件的備份（並實際執行那段
+  heredoc 備份一個資料庫）、版本偵測不讀原始碼、先確保 setuptools 再建置、離線升級在任何 `pip install`
+  之前檢查 Python 版本、所有部署腳本都是有效的 bash。
+
 ## [1.16.2] - 2026-10-02
 
 ### 修正

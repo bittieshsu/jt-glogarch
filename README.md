@@ -1,4 +1,4 @@
-# jt-glogarch v1.16.2
+# jt-glogarch v1.16.3
 
 **Language**: **English** | [繁體中文](README-zh_TW.md) | [日本語](README-ja.md)  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Archive & restore logs for Graylog Open (6.x / 7.x)
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.16.2-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.16.3-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open does not include the Archive feature available in the Enterprise edition.
@@ -1432,6 +1432,27 @@ sudo -u jt-glogarch glogarch -c /opt/jt-glogarch/config.yaml import \
 
 
 ## Troubleshooting / FAQ
+
+### After upgrading the OS (e.g. Ubuntu 22.04 → 24.04) the service keeps restarting
+
+`journalctl -u jt-glogarch` shows `ModuleNotFoundError: No module named 'glogarch'` (or
+`fastapi`, `click`, …). An OS release upgrade changes `python3` (22.04 has 3.10, 24.04 has
+3.12), and everything pip installed for the old Python is invisible to the new one. Nothing
+is lost — archives, database and settings are untouched — but the service cannot start
+until it is reinstalled for the new Python. Run the normal upgrade once, **after** the OS
+upgrade (and after the reboot):
+
+```bash
+sudo bash /opt/jt-glogarch/deploy/upgrade.sh
+```
+
+It says that Python changed, backs up the database first, reinstalls jt-glogarch and every
+dependency (and the PDF report browser) for the new Python, restarts the service and checks
+that it is healthy and every schedule is registered. `/usr/local/lib/python3.10/` is no
+longer used afterwards. An **air-gapped** host needs an offline bundle built on the same
+Python as the host now runs (e.g. build it inside `docker run ubuntu:24.04` for 3.12); a
+bundle for the old Python is refused before anything is changed.
+
 
 ### After an upgrade, PDF reports fail: "Executable doesn't exist at …/chromium_headless_shell-NNNN/…"
 

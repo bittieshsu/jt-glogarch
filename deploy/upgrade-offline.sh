@@ -59,9 +59,25 @@ fi
 echo "Bundle:  $BUNDLE_DIR"
 echo "Wheel:   $(basename "$WHEEL")"
 
-CURRENT=$(python3 -c "import glogarch; print(glogarch.__version__)" 2>/dev/null || echo "unknown")
+CURRENT=$(cd / && python3 -c "import glogarch; print(glogarch.__version__)" 2>/dev/null || echo "unknown")
 echo "Current: $CURRENT"
 echo ""
+
+# The bundle's compiled wheels (uvloop, httptools, pydantic-core, ...) load only
+# on the Python they were built for. After an OS upgrade (Ubuntu 22.04 -> 24.04
+# takes python3 from 3.10 to 3.12) a bundle built for 3.10 used to get as far as
+# installing jt-glogarch WITHOUT its dependencies — pip's error went into a
+# `| tail` — leaving a service that cannot start. Stop before touching anything.
+PYVER=$(python3 -c 'import sys;print("%d.%d"%sys.version_info[:2])')
+BUNDLE_PY=$(ls "$BUNDLE_DIR"/*.whl 2>/dev/null | grep -oE 'cp3[0-9]+' | head -1 | sed 's/cp3/3./')
+if [ -n "$BUNDLE_PY" ] && [ "$BUNDLE_PY" != "$PYVER" ]; then
+    echo "Error: this bundle carries compiled wheels for Python $BUNDLE_PY, but this"
+    echo "       host runs Python $PYVER (was the operating system upgraded?)."
+    echo "       Nothing was changed. Build the bundle on a host — or a container —"
+    echo "       running Python $PYVER (e.g. 'docker run ubuntu:24.04' for 3.12) with"
+    echo "       scripts/build-offline-bundle.sh, then run this again."
+    exit 1
+fi
 
 # PEP 668 (Ubuntu 24.04+/Debian 12+/Python 3.11+) — add --break-system-packages
 EM_FILE=$(python3 -c 'import sysconfig; print(sysconfig.get_paths()["stdlib"] + "/EXTERNALLY-MANAGED")' 2>/dev/null || true)

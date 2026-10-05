@@ -43,8 +43,29 @@ else
 fi
 
 # Show current version
-CURRENT=$(python3 -c "import glogarch; print(glogarch.__version__)" 2>/dev/null || echo "unknown")
+# From / so a run started inside $INSTALL_DIR does not import the SOURCE tree
+# and report a version that the installed package may not have.
+CURRENT=$(cd / && python3 -c "import glogarch; print(glogarch.__version__)" 2>/dev/null || echo "unknown")
 echo "Current version: $CURRENT"
+
+# Did python3 change under us? An OS release upgrade (Ubuntu 22.04 -> 24.04)
+# moves python3 from 3.10 to 3.12, and everything pip installed for 3.10 —
+# jt-glogarch and all its dependencies — is invisible to 3.12: the service
+# crash-loops with "No module named ..." until this script reinstalls it.
+PY_NOW=$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])')
+PY_OLD=""
+if [ ! -d "/usr/local/lib/python$PY_NOW/dist-packages/glogarch" ]; then
+    PY_OLD=$(ls -d /usr/local/lib/python3.*/dist-packages/glogarch 2>/dev/null \
+             | sed -n 's#^/usr/local/lib/python\([0-9.]*\)/.*#\1#p' | sort -V | tail -1)
+fi
+if [ -n "$PY_OLD" ]; then
+    echo ""
+    echo "  python3 is now $PY_NOW, but jt-glogarch was installed for Python $PY_OLD"
+    echo "  (the operating system was upgraded). Packages under"
+    echo "  /usr/local/lib/python$PY_OLD/ are invisible to Python $PY_NOW, so the service"
+    echo "  cannot start until this upgrade reinstalls everything for Python $PY_NOW."
+    echo "  That takes a few minutes; archives, database and settings are not touched."
+fi
 
 # Detect PEP 668 lockdown (Ubuntu 24.04+ / Debian 12+ / Python 3.11+ ship
 # /usr/lib/pythonX.Y/EXTERNALLY-MANAGED). Pass --break-system-packages when
@@ -84,7 +105,42 @@ if ( cd "$INSTALL_DIR" && sudo -u jt-glogarch python3 -m glogarch db-backup --he
         fi
     fi
 else
-    echo "  (skip: db-backup not available in current version)"
+    # The installed jt-glogarch cannot run its own db-backup: a version from
+    # before the command existed, or — after an OS upgrade — one installed for
+    # another Python (see above), which used to skip the backup at exactly the
+    # upgrade that needs it most. Python's own sqlite3 can always do it, with
+    # the same online-backup API and the same file name db-backup uses.
+    _db=$(sed -n 's/^database_path:[[:space:]]*//p' "$INSTALL_DIR/config.yaml" 2>/dev/null \
+          | head -1 | tr -d "\"'")
+    [ -n "$_db" ] || _db="jt-glogarch.db"
+    case "$_db" in /*) ;; *) _db="$INSTALL_DIR/$_db" ;; esac
+    if [ -f "$_db" ]; then
+        _out="/var/backups/jt-glogarch/$(basename "$_db" .db)-$(date -u +%Y%m%dT%H%M%SZ).db"
+        if python3 - "$_db" "$_out" <<'PYBACKUP'
+import sqlite3, sys
+src = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+dst = sqlite3.connect(sys.argv[2])
+src.backup(dst)
+dst.close()
+src.close()
+PYBACKUP
+        then
+            chown jt-glogarch:jt-glogarch "$_out" 2>/dev/null || true
+            echo "  Backup written (Python sqlite3): $_out ($(du -h "$_out" | cut -f1))"
+        else
+            echo "  ⚠ WARNING: database backup FAILED (see error above)."
+            if read -r -p "  Continue upgrade without a fresh backup? [y/N] " _ans </dev/tty 2>/dev/null; then
+                case "$_ans" in
+                    y|Y) echo "  Continuing without fresh backup." ;;
+                    *)   echo "  Aborting upgrade."; exit 1 ;;
+                esac
+            else
+                echo "  (non-interactive) Continuing WITHOUT a fresh backup — verify the backup manually."
+            fi
+        fi
+    else
+        echo "  (skip: no database at $_db yet)"
+    fi
 fi
 
 # 2. Pull latest
@@ -226,6 +282,12 @@ fi
 # 3. Install
 echo ""
 echo "[3/5] Installing..."
+# --no-build-isolation builds with the system setuptools; a fresh Python (after
+# an OS upgrade) may not have it yet.
+if ! python3 -c "import setuptools, wheel" >/dev/null 2>&1; then
+    echo "  Installing setuptools/wheel for Python $PY_NOW..."
+    pip install $PIP_TLS_OPTS $PIP_FLAGS --no-cache-dir "setuptools>=68.0" wheel 2>&1 | tail -1
+fi
 pip install $PIP_TLS_OPTS $PIP_FLAGS --no-build-isolation --no-cache-dir --force-reinstall --no-deps "$INSTALL_DIR" 2>&1 | tail -1
 # Pull in the [report] extra (Playwright) — an existing install predating PDF
 # Reports won't have it; upgrades must. Deps-only, cheap when already satisfied.
@@ -286,6 +348,10 @@ echo ""
 echo "=== Upgrade Complete ==="
 echo "  $CURRENT → $NEW"
 echo "  Health: $STATUS"
+if [ -n "$PY_OLD" ]; then
+    echo "  Reinstalled for Python $PY_NOW (was $PY_OLD). /usr/local/lib/python$PY_OLD/ is no"
+    echo "  longer used by jt-glogarch and can be removed once you have checked nothing else needs it."
+fi
 
 # Principle 3: an upgrade must NEVER stop scheduled archiving. "scheduler
 # running" is not enough — an enabled schedule that failed to register never

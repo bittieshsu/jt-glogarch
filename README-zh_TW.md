@@ -1,4 +1,4 @@
-# jt-glogarch v1.16.2
+# jt-glogarch v1.16.3
 
 **語言**： [English](README.md) | **繁體中文** | [日本語](README-ja.md)  
 **網站**： <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Graylog Open (6.x / 7.x) 的記錄歸檔與還原工具
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.16.2-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.16.3-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open 版本不支援 Enterprise 版的 Archive 功能。
@@ -1308,6 +1308,23 @@ sudo -u jt-glogarch glogarch import \
 
 
 ## 疑難排解 / 常見問題
+
+### 升級作業系統（例如 Ubuntu 22.04 → 24.04）之後，服務一直重新啟動
+
+`journalctl -u jt-glogarch` 顯示 `ModuleNotFoundError: No module named 'glogarch'`（或 `fastapi`、
+`click` 等）。作業系統大版本升級會換掉 `python3`（22.04 是 3.10，24.04 是 3.12），之前用 pip 為舊
+Python 安裝的所有套件，新的 Python 都看不到。資料不會遺失，歸檔、資料庫與設定都沒有被動到，但在為新的
+Python 重新安裝之前，服務無法啟動。請在作業系統升級（並重新開機）**之後**，執行一次一般的升級：
+
+```bash
+sudo bash /opt/jt-glogarch/deploy/upgrade.sh
+```
+
+它會說明 Python 已經換了版本、先備份資料庫，再為新的 Python 重新安裝 jt-glogarch 與所有相依套件（包括
+PDF 報表用的瀏覽器），重新啟動服務，並確認服務健康、每個排程都已註冊。完成後就不再使用
+`/usr/local/lib/python3.10/`。**無法連網**的主機，需要用和主機目前相同的 Python 版本製作離線安裝包（例如
+在 `docker run ubuntu:24.04` 裡製作 3.12 版）；舊 Python 版本的安裝包會在動到任何東西之前就被拒絕。
+
 
 ### 升級後 PDF 報表失敗：「Executable doesn't exist at …/chromium_headless_shell-NNNN/…」
 
