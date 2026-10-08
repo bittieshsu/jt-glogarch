@@ -827,6 +827,19 @@ failure.
 - [ ] Any new step in `upgrade.sh` that runs BEFORE the reinstall works when the
       installed package cannot be imported (a different Python).
 
+### Retry a failed import from Job History (v1.16.4)
+
+- [ ] **Clicked, not called** (`ui-sim-test.py` step 7c): Job History → Retry → the
+      real Confirm button opens the import dialog on the Archives page with the job's
+      archives, target and mode. The dialog lives only in the Archives page's block,
+      so Confirm threw on Job History and did nothing from v1.13.35 to v1.16.3.
+- [ ] **The mode follows what reached the target**: nothing imported → same mode,
+      "cannot duplicate"; a Bulk job → Bulk (dedups by message id); a GELF job that
+      sent messages → GELF with a duplicate warning (GELF never forwards
+      `gl2_message_id`, so no mode can skip what it already indexed).
+- [ ] Any button that opens a dialog from ANOTHER page's template block navigates
+      there instead (`tests/test_retry_import_ui.py`).
+
 ### Test Results
 
 - [ ] `./scripts/run-tests.sh` passes — `TEST-RESULTS.md` generated

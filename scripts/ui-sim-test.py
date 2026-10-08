@@ -479,6 +479,93 @@ async def main():
         check("no JS errors while translating job notes", len(errs) == n7, "; ".join(errs[n7:])[:200])
         await pg.evaluate("setLang('en')")
 
+        # 7c) Retry on a failed import, clicked the way the customer did: Job
+        # History -> Retry -> Confirm. The import dialog only exists on the
+        # Archives page, so Confirm threw on Job History and did nothing
+        # (v1.13.35-1.16.3). The mode must follow what reached the target: only
+        # Bulk dedups, and a GELF job was switched to Bulk with a false "no
+        # duplicates" promise.
+        n8 = len(errs)
+        rjob = {"id": "uisim-job-0003", "job_type": "import", "status": "failed",
+                "progress_pct": 0, "messages_done": 0, "messages_total": 211,
+                "error_message": note, "source": "manual:gelf",
+                "started_at": "2026-10-08T03:33:15", "completed_at": "2026-10-08T03:33:15",
+                "phase": "", "current_detail": "",
+                "retry_config": {"archive_ids": [987654], "mode": "gelf",
+                                 "target_api_url": "http://192.0.2.7:9000", "gelf_host": "192.0.2.7",
+                                 "gelf_port": 32299, "gelf_protocol": "tcp"}}
+
+        async def _route_rlist(route):
+            await route.fulfill(status=200, content_type="application/json",
+                                body=json.dumps({"items": [rjob]}))
+
+        async def _route_rone(route):
+            await route.fulfill(status=200, content_type="application/json", body=json.dumps(rjob))
+
+        async def _route_cap(route):      # never let the backend dial the fake target
+            await route.fulfill(status=200, content_type="application/json",
+                                body=json.dumps({"error": "uisim"}))
+
+        await pg.route("**/api/jobs?*", _route_rlist)
+        await pg.route("**/api/jobs/uisim-job-0003**", _route_rone)
+        await pg.route("**/api/import/capacity-estimate", _route_cap)
+        try:
+            await pg.evaluate("setLang('zh-TW')")
+            await pg.goto(f"{BASE}/jobs", wait_until="networkidle")
+            await pg.wait_for_timeout(800)
+            await pg.click("#jobs-table [data-act=retryImport]")
+            await pg.wait_for_timeout(800)
+            msg = await pg.evaluate("document.getElementById('confirm-message').textContent")
+            check("Retry on an import that sent nothing keeps its mode and says it cannot duplicate",
+                  "GELF" in msg and "不會重複" in msg and "Bulk" not in msg, msg[:120])
+            await pg.click("#confirm-buttons [data-act=doConfirm]")      # the real Confirm button
+            nav_err = ""
+            try:
+                await pg.wait_for_url("**/archives**", timeout=10000)
+            except Exception as e:     # recorded by the check below, never fatal
+                nav_err = f" no navigation: {type(e).__name__}"
+            await pg.wait_for_timeout(2500)
+            got = await pg.evaluate("""() => ({
+                path: location.pathname + location.search,
+                shown: (document.getElementById('import-modal') || {style: {}}).style.display,
+                mode: (document.querySelector('input[name=import-mode]:checked') || {}).value,
+                url: (document.getElementById('modal-target-api-url') || {}).value,
+                host: (document.getElementById('modal-gelf-host') || {}).value,
+                port: (document.getElementById('modal-gelf-port') || {}).value,
+                ids: JSON.stringify(window._batchImportIds)})""")
+            check("Confirm opens the import dialog on Archives with the job's archives, target and mode",
+                  got["path"] == "/archives" and got["shown"] == "flex" and got["mode"] == "gelf"
+                  and got["url"] == "http://192.0.2.7:9000" and got["host"] == "192.0.2.7"
+                  and got["port"] == "32299" and got["ids"] == "[987654]", str(got) + nav_err)
+            await pg.evaluate("document.getElementById('import-modal') && closeImportModal()")
+            # a GELF job that DID send messages: GELF again, and say it duplicates
+            rjob.update(messages_done=150, error_message="Import completed with 3 indexer failures")
+            await pg.goto(f"{BASE}/jobs", wait_until="networkidle")
+            await pg.wait_for_timeout(800)
+            await pg.click("#jobs-table [data-act=retryImport]")
+            await pg.wait_for_timeout(800)
+            msg = await pg.evaluate("document.getElementById('confirm-message').textContent")
+            check("Retry on a GELF job that sent messages warns about duplicates instead of promising none",
+                  "150" in msg and "重複" in msg and "不會重複" not in msg, msg[:120])
+            await pg.evaluate("closeConfirm()")
+            # a Bulk job: Bulk again (it dedups by id)
+            rjob.update(source="manual:bulk", retry_config={**rjob["retry_config"], "mode": "bulk"})
+            await pg.goto(f"{BASE}/jobs", wait_until="networkidle")
+            await pg.wait_for_timeout(800)
+            await pg.click("#jobs-table [data-act=retryImport]")
+            await pg.wait_for_timeout(800)
+            msg = await pg.evaluate("document.getElementById('confirm-message').textContent")
+            dn = await pg.evaluate("window._hasDataNode === true")
+            check("Retry on a Bulk job stays Bulk (dedups by message id)",
+                  ("Bulk" in msg and "不會重複" in msg) if not dn else ("Data Node" in msg), msg[:120])
+            await pg.evaluate("closeConfirm()")
+        finally:
+            await pg.unroute("**/api/jobs?*")
+            await pg.unroute("**/api/jobs/uisim-job-0003**")
+            await pg.unroute("**/api/import/capacity-estimate")
+            await pg.evaluate("setLang('en')")
+        check("no JS errors in the import retry flow", len(errs) == n8, "; ".join(errs[n8:])[:200])
+
         # 8) editing a schedule through the real dialog keeps it DISABLED and keeps
         # its server. The edit form has no enabled switch; saving used to switch
         # a schedule another admin had disabled back on, and dropped the server.

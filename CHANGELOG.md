@@ -2,6 +2,46 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.16.4] - 2026-10-08
+
+### Fixed
+
+- **Retry on a failed import did nothing.** In Job History, Retry → Confirm left
+  the confirm box open and opened nothing: the import dialog exists only on the
+  Archives page, and the confirm step threw on the missing element. It never
+  worked from Job History since Retry was added in 1.13.35 (reported by a
+  customer). Confirm now switches to the Archives page and opens the import
+  dialog there with the job's archives, target (Graylog API URL, GELF
+  host/port/protocol) and mode. Credentials still come from the saved import
+  defaults, as before.
+- **Retry no longer promises "no duplicates" when it cannot keep that promise,
+  and no longer switches a GELF import to Bulk.** Only Bulk skips messages it
+  already wrote (it uses the archived `gl2_message_id` as the document id). A
+  GELF import never sends that id, so once a GELF job has indexed messages,
+  neither mode can skip them. The confirm used to say Bulk would add "ONLY the
+  previously-failed messages", while really writing every message again into a
+  separate index set. The retry now keeps the job's mode:
+  - nothing imported (for example the import check found no GELF input): same
+    mode, and the confirm says it cannot create duplicates; fix the cause in the
+    Note column first;
+  - a Bulk job: Bulk again, only the missing documents are added;
+  - a GELF job that already sent messages: GELF again, with a warning that those
+    messages will be duplicated.
+- The Retry tooltip says what the button does (open the import dialog with the
+  same archives and target) instead of mentioning only indexer failures.
+
+### Verified
+
+- Headless Chromium against staging (`ui-sim-test.py` step 7c, real clicks on
+  Retry and Confirm): the old code failed it with `Cannot set properties of null`
+  and the confirm box stuck open. The new code opens the dialog on Archives with
+  the job's archives, target and mode, and the three confirm texts match the
+  three cases.
+- `tests/test_retry_import_ui.py` (6) runs the real mode decision from `app.js`
+  in node; 4 of them fail on 1.16.3.
+- Checked the other pages: no other button opens a dialog that exists only on
+  another page.
+
 ## [1.16.3] - 2026-10-05
 
 ### Fixed

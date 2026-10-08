@@ -3097,42 +3097,87 @@ async function cancelJob(jobId) {
     );
 }
 
-// One-click retry of a failed import: re-imports that job's archives. Prefers
-// Bulk mode (dedups by message id → only the previously-failed messages get
-// added, no duplicates); falls back to GELF with a clear duplicate warning when
-// the target is a Data Node (Bulk unavailable). The offending fields were
-// already auto-pinned as string during the original run.
-async function retryImport(jobId) {
-    const j = await fetchJSON(`${API}/jobs/${jobId}`);
+// One-click retry of a failed import: re-imports that job's archives with its
+// target. The mode follows what actually reached the target, because only Bulk
+// dedups (by gl2_message_id) and GELF never forwards that id (gelf/sender.py
+// SKIP_FIELDS), so a GELF-indexed message cannot be recognised by either mode:
+//   - nothing was imported (a preflight abort, 0 sent): same mode, no duplicates
+//   - a Bulk job: Bulk again, only the missing documents are added
+//   - a GELF job that sent some: GELF again (same destination), with a
+//     duplicate warning. Switching it to Bulk used to promise "no duplicates"
+//     while writing every message again into another index set.
+// The offending fields were already auto-pinned as string during the first run.
+async function _retryPlan(jobId) {
+    const j = await fetchJSON(`${API}/jobs/${encodeURIComponent(jobId)}`);
     const rc = (j && j.retry_config) || {};
     const ids = rc.archive_ids || [];
-    if (!ids.length) { showAlert(t('retry_no_archives')); return; }
     let dn = window._hasDataNode;
     if (dn === undefined) {
         try { const s = await fetchJSON(`${API}/servers`); dn = (s.items || []).some(x => x.has_datanode); window._hasDataNode = dn; }
         catch (e) { dn = false; }
     }
-    const mode = dn ? 'gelf' : 'bulk';
-    const msg = (mode === 'bulk' ? t('retry_confirm_bulk') : t('retry_confirm_gelf'))
-        .replace('{n}', formatNumber(ids.length));
-    showConfirm(`${icon('refresh')} ${t('retry_import')}`, msg, () => {
-        window._batchImportIds = ids;
-        _importArchiveId = null;
-        const modal = document.getElementById('import-modal');
-        document.getElementById('modal-import-result').innerHTML = '';
-        modal.style.display = 'flex';
-        applyI18n();
-        _autofillImportModal();
-        _applyImportDataNodeLock();
-        // Preselect the safe mode and prefill the target from the failed job.
+    const sent = Number((j && j.messages_done) || 0);
+    const mode = (rc.mode === 'bulk' && !dn) ? 'bulk' : 'gelf';
+    let key;
+    if (sent === 0) key = 'retry_confirm_same';
+    else if (mode === 'bulk') key = 'retry_confirm_bulk';
+    else if (rc.mode === 'bulk') key = 'retry_confirm_gelf';      // a Bulk job, but Bulk is unavailable now
+    else key = 'retry_confirm_gelf_dup';
+    const msg = t(key).replace('{n}', formatNumber(ids.length)).replace('{done}', formatNumber(sent))
+        .replace('{mode}', mode === 'bulk' ? 'Bulk' : 'GELF');
+    return {ids, rc, mode, msg};
+}
+
+function _openRetryImport(plan) {
+    const {ids, rc, mode} = plan;
+    window._batchImportIds = ids;
+    _importArchiveId = null;
+    const modal = document.getElementById('import-modal');
+    document.getElementById('modal-import-result').innerHTML = '';
+    const form = document.getElementById('import-modal-form');
+    if (form && !_activeImportJobId) form.style.display = 'block';
+    modal.style.display = 'flex';
+    applyI18n();
+    // The job's own target goes in BEFORE the stored defaults load: the
+    // autofill only fills fields that are still empty.
+    const setv = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
+    setv('modal-target-api-url', rc.target_api_url);
+    setv('modal-gelf-host', rc.gelf_host);
+    setv('modal-gelf-protocol', rc.gelf_protocol);
+    if (rc.gelf_port) setv('modal-gelf-port', String(rc.gelf_port));
+    _autofillImportModal();
+    _applyImportDataNodeLock().then(() => {
         const radio = document.querySelector(`input[name="import-mode"][value="${mode}"]`);
-        if (radio && !radio.disabled) { radio.checked = true; if (typeof onImportModeChange === 'function') onImportModeChange(mode); }
-        const setv = (id, v) => { const el = document.getElementById(id); if (el && v) el.value = v; };
-        setv('modal-target-api-url', rc.target_api_url);
-        setv('modal-gelf-host', rc.gelf_host);
-        if (rc.gelf_port) setv('modal-gelf-port', String(rc.gelf_port));
-        setTimeout(estimateImportCapacity, 400);
+        if (radio && !radio.disabled) { radio.checked = true; onImportModeChange(mode); }
     });
+    setTimeout(estimateImportCapacity, 400);
+}
+
+async function retryImport(jobId) {
+    const plan = await _retryPlan(jobId);
+    if (!plan.ids.length) { showAlert(t('retry_no_archives')); return; }
+    showConfirm(`${icon('refresh')} ${t('retry_import')}`, plan.msg, () => {
+        // The import dialog lives on the Archives page. Job History has no
+        // #import-modal, and opening it there threw, so Confirm did nothing
+        // (v1.13.35-1.16.3).
+        if (!document.getElementById('import-modal')) {
+            window.location.href = `/archives?retry_import=${encodeURIComponent(jobId)}`;
+            return;
+        }
+        _openRetryImport(plan);
+    });
+}
+
+// Archives page opened from Job History's Retry: the operator already
+// confirmed there, so open the dialog straight away (once — the parameter is
+// dropped so a reload does not reopen it).
+async function _resumeRetryImport() {
+    const jobId = new URLSearchParams(window.location.search).get('retry_import');
+    if (!jobId) return;
+    history.replaceState(null, '', window.location.pathname);
+    const plan = await _retryPlan(jobId);
+    if (!plan.ids.length) { showAlert(t('retry_no_archives')); return; }
+    _openRetryImport(plan);
 }
 
 // ---- Schedules ----
@@ -4247,7 +4292,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const path = window.location.pathname;
     if (path === '/' || path === '') { loadDashboard(); loadOpenSearchStatus(); loadNotifyStatus(); startJobsPoll(loadRecentJobs); }
-    else if (path === '/archives') { initColumnSettings(); loadArchives(); loadArchivePath(); }
+    else if (path === '/archives') { initColumnSettings(); loadArchives(); loadArchivePath(); _resumeRetryImport(); }
     else if (path === '/export') { loadExportPage().then(() => setTimeout(initCustomSelects, 200)); }
     else if (path === '/import') { window.location.href = '/archives'; return; }
     else if (path === '/jobs') { loadTable('#jobs-table', loadJobs); startJobsPoll(loadJobs); }
