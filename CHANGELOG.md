@@ -2,6 +2,79 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.17.0] - 2026-10-18
+
+### Added
+
+- **Alerting: manage Graylog event definitions and notifications in bulk** (new
+  page, sidebar "Alerting"). Built for the case "I added a Zulip notification —
+  how do I put it on a few hundred existing definitions?".
+  - **Find them**: quick filters (enabled with no notification, no notification,
+    pointing at a deleted notification, enabled, disabled, never matched, no match in 90
+    days, high priority), title-tag chips read from the naming people already use
+    (`[CheckPoint] [FSOC] …`, `CubeCOS - …`), and a search box where spaces mean
+    AND: `checkpoint -test notif:Zulip -notif:Email tag:F5 prio:3 state:disabled`,
+    `"exact phrase"`, `notif:none`. Filters live in the URL.
+  - **Select them**: per row, shift-click for a range, the page, or every
+    matching definition. A selection survives a filter change, and the page says
+    how many selected definitions are no longer shown.
+  - **Change them**: add, remove or replace a notification. The server computes a
+    preview (will change / already as requested / skipped, each with a reason) and
+    Apply runs exactly that plan as a Task Log job. Every definition is re-read
+    right before it is written, so a definition someone edited in Graylog after
+    the preview is skipped, and other fields edited meanwhile are kept.
+  - **Each definition keeps its enabled / disabled state.** Graylog's update API
+    sets the state from its `schedule` parameter, which defaults to "enabled"
+    (measured on Graylog 7.1.5: a PUT without it enabled a disabled definition), so
+    every write passes the definition's current state and checks what Graylog
+    stored.
+  - **Undo**: every change is logged before it is sent; Change history can put the
+    previous notifications back (definitions changed since then are skipped).
+  - **Health check**: enabled definitions nobody is notified about, definitions
+    that point to a deleted notification, notifications no definition uses,
+    definitions that never or no longer match, disabled definitions — each with a
+    button that filters the list to them.
+  - **Notifications tab**: type, how many definitions use each (click to list them)
+    and a Test button (Graylog's own test send).
+  - **Click a definition** to see it, read live from Graylog: description, query,
+    streams, schedule ("runs every 5 min, searching the last 5 min"), aggregation and
+    condition as text (`count() > 10 AND avg(bytes) >= 5`), notifications with grace
+    period, last matched / updated, the raw JSON, and a link to open it in Graylog.
+  - While the definitions load (several seconds for hundreds), the toolbar, the
+    table and every tab say so with a spinner and the elapsed seconds, and the
+    action buttons stay disabled until the data is there.
+  - **Every spinner in the app now visibly turns.** The shared spinner drew a
+    text-muted ring with an accent quarter; at 14 px the two colours are nearly the
+    same (contrast 1.3), so it turned but read as a still circle. It now uses a light
+    track with an accent half-arc, like the search spinner already did.
+- **Changes are made with the logged-in user's own Graylog account**, so Graylog's
+  permissions apply and Graylog's records show the real person, not the service
+  account. At login the password is exchanged for a Graylog session
+  (`POST /api/system/sessions`) and dropped; only the session id is kept, in the
+  service's memory (never in the cookie, the DB or on disk). Logout closes it.
+  After a service restart, or for `localadmin`, the page asks to sign in to
+  Graylog. A token login uses the token.
+
+### Fixed
+- **`run-tests.sh` now fails when the version check fails.** It wrote "Version
+  Check: FAIL" into `TEST-RESULTS.md` while still printing ALL PASSED and exiting 0
+  (the hit was a test docstring and the git-ignored `zap/` scan reports, which
+  `check-version.sh` now skips). Pinned by a test that runs the real script.
+
+### Verified
+
+- `tests/test_alerting.py` (32): planning, state preservation, conflicts, partial
+  failure, sign-in expiry, cancel, undo, the real HTTP client, the identity store,
+  login, the API and the page's filter logic (node runs the real `alerting.js`).
+- `scripts/e2e-alerting-test.py` against a real Graylog 7.1.5 (.83): 30
+  definitions, 12 disabled — no state changed, every other field byte-identical,
+  an edit between preview and apply was skipped, undo restored exactly, the system
+  definition was never written, a Reader-role user changed nothing.
+- `scripts/ui-alerting-test.py`, headless Chromium with real clicks against a
+  jt-glogarch pointed at the test Graylog: filter → select → preview → apply →
+  verified in Graylog → Job History → undo → health → zh-TW → sign in again after a
+  service restart. No JS errors.
+
 ## [1.16.5] - 2026-10-15
 
 ### Fixed

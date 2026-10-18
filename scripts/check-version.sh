@@ -23,6 +23,7 @@ BAD=$(grep -rnE "v?${VER//./\\.}" \
     --include='*.js' \
     --include='*.css' \
     --include='*.toml' \
+    --exclude-dir=zap --exclude-dir=.playwright --exclude-dir=.git \
     . 2>/dev/null \
     | grep -v 'glogarch/__init__.py' \
     | grep -v 'github/glogarch/__init__.py' \

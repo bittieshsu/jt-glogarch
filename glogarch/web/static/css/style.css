@@ -415,8 +415,12 @@
     display: inline-block;
     width: 14px;
     height: 14px;
-    border: 2px solid var(--text-muted);
+    /* Light track + accent arc (same as .search-spinner). A text-muted track
+       is nearly the accent's colour at 14 px, so the turning arc could not be
+       seen and the spinner read as a still circle. */
+    border: 2px solid var(--border);
     border-top-color: var(--accent);
+    border-right-color: var(--accent);
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     margin-right: 6px;
@@ -1215,7 +1219,8 @@ tr:hover { background: var(--hover-bg); }
 /* The search box sits directly under these filters and must look
    identical; share the rule rather than copying it. */
 .filter-item input,
-.search-row input {
+.search-row input,
+.al-search-line input {
     width: 100%;
     padding: 7px 10px;
     border: 1px solid var(--border);
@@ -1802,7 +1807,7 @@ button:disabled:hover, .btn-primary:disabled:hover, .btn-danger:disabled:hover {
 
 .search-row { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
 .search-row label { display: block; font-size: 0.85em; color: var(--text-muted); margin-bottom: 6px; }
-.search-row input:focus { outline: none; border-color: var(--accent); }
+.search-row input:focus, .al-search-line input:focus { outline: none; border-color: var(--accent); }
 .search-f2 { flex: 2; min-width: 260px; }
 .search-f1 { flex: 1.3; min-width: 200px; }
 .search-f0 { flex: 0 0 110px; }
@@ -2009,3 +2014,134 @@ mark.hl {
 .cancel-live td { padding: 2px 12px 2px 0; border: none; vertical-align: top; }
 .cancel-live td:first-child { color: var(--text-muted); white-space: nowrap; }
 .cancel-live-warn { margin-top: 6px; }
+
+/* ---- Alerting (Graylog event definitions + notifications) -------------- */
+/* Filter chips: the same pill shape as the column-settings chips. */
+.al-chips { display: flex; flex-wrap: wrap; gap: 6px 8px; margin-bottom: 10px; }
+.al-chip {
+    padding: 4px 11px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--card-bg);
+    color: var(--text-muted);
+    font-size: 0.84em;
+    cursor: pointer;
+    user-select: none;
+}
+.al-chip:hover { border-color: var(--accent); color: var(--text); background: var(--card-bg); }
+.al-chip.active { border-color: var(--accent); color: var(--accent); font-weight: 600; background: var(--hover-bg); }
+.al-chip .al-n { opacity: 0.75; margin-left: 4px; font-weight: normal; }
+.al-nchip { display: inline-block; font-size: 0.82em; padding: 1px 8px; margin: 1px 4px 1px 0;
+            border-radius: 10px; background: var(--hover-bg); border: 1px solid var(--border); white-space: nowrap; }
+.al-nchip.al-dangling { border-color: var(--danger); color: var(--danger); }
+.al-none { color: var(--text-muted); font-size: 0.85em; }
+.al-state-on { color: var(--success); font-weight: 500; }
+.al-state-off { color: var(--text-muted); }
+.al-sys { font-size: 0.75em; color: var(--text-muted); margin-left: 4px; }
+tr.al-row-sel td { background: var(--hover-bg); }
+/* Action dialog */
+.al-pick { display: flex; flex-direction: column; gap: 6px; max-height: 260px; overflow-y: auto;
+           padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--hover-bg); }
+.al-pick label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.92em; }
+.al-pick label .al-n { color: var(--text-muted); font-size: 0.85em; margin-left: auto; }
+.al-pick input { width: auto; }
+.al-summary { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin: 6px 0 12px; }
+.al-sum { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; }
+.al-sum .al-sum-n { font-size: 1.5em; font-weight: 600; }
+.al-sum .al-sum-l { font-size: 0.82em; color: var(--text-muted); }
+.al-sum.al-sum-change .al-sum-n { color: var(--accent); }
+.al-sum.al-sum-skip .al-sum-n { color: var(--warning); }
+.al-list { max-height: 240px; overflow-y: auto; font-size: 0.86em; border: 1px solid var(--border);
+           border-radius: 6px; padding: 6px 10px; margin-bottom: 10px; }
+.al-list div { padding: 3px 0; border-bottom: 1px dashed var(--border); }
+.al-list div:last-child { border-bottom: none; }
+.al-list .al-why { color: var(--warning); margin-left: 6px; }
+.al-note { font-size: 0.86em; color: var(--text-muted); margin: 6px 0 10px; }
+.al-note.al-warn { color: var(--warning); }
+/* Health check cards */
+.al-health { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.al-hcard { border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; background: var(--card-bg); }
+.al-hcard h4 { margin: 0 0 6px; font-size: 0.95em; display: flex; align-items: center; gap: 6px; }
+.al-hcard .al-hn { font-size: 1.7em; font-weight: 600; }
+.al-hcard.al-hbad .al-hn { color: var(--danger); }
+.al-hcard.al-hwarn .al-hn { color: var(--warning); }
+.al-hcard.al-hok .al-hn { color: var(--success); }
+.al-hcard p { margin: 6px 0 10px; font-size: 0.85em; color: var(--text-muted); }
+.al-hlist { font-size: 0.85em; margin: 0 0 10px; padding-left: 18px; }
+@media (max-width: 700px) { .al-summary { grid-template-columns: 1fr; } }
+.al-warn { color: var(--warning); }
+a.al-link-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 6px;
+                text-decoration: none; border: 1px solid var(--border); color: var(--text); }
+a.al-link-btn:hover { border-color: var(--accent); }
+/* The "acting as" line is one sentence: not a stacked flex column. */
+.al-matched { white-space: nowrap; font-size: 0.9em; }
+/* Four tabs on a phone: scroll sideways instead of wrapping a character per line. */
+#al-tabs { overflow-x: auto; }
+#al-tabs .arch-tab { white-space: nowrap; flex: 0 0 auto; }
+
+/* Toolbar: one row, everything on the same centre line. */
+.al-toolbar { padding-top: 14px; padding-bottom: 14px; }
+.al-bar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 20px; }
+.al-bar-left, .al-bar-right { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; min-width: 0; }
+.al-inline-label { font-size: 0.85em; color: var(--text-muted); font-weight: 600; }
+/* The custom select is width:100% everywhere else; here it is one item in a row. */
+.al-bar-left .custom-select { width: auto; min-width: 160px; max-width: 260px; flex: 0 0 auto; }
+.al-bar-left .al-inline-label { display: inline; margin: 0; }
+.al-who { font-size: 0.9em; color: var(--text-muted); }
+.al-who strong { color: var(--text); }
+.al-who.al-warn { color: var(--warning); }
+.al-fetched { font-size: 0.82em; color: var(--text-muted); }
+/* Filters: labels in one column, their content starts on one line. */
+.al-filters { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 12px 16px; align-items: start; }
+.al-filter-label { font-size: 0.85em; font-weight: 600; color: var(--text-muted); padding-top: 6px; white-space: nowrap; }
+.al-filter-label-input { padding-top: 10px; }
+.al-filters .al-chips { margin-bottom: 0; }
+.al-tags-row.is-hidden { display: none; }
+.al-search-line { display: flex; gap: 10px; align-items: center; }
+.al-search-line input { flex: 1; min-width: 0; }
+.al-search-hint { font-size: 0.8em; color: var(--text-muted); margin: 6px 0 0; }
+.al-search .search-help { margin-top: 10px; }
+/* Batch bar: actions left, selection right. */
+.al-batch { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px;
+            margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.al-batch-actions, .al-batch-sel { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.al-sel { font-size: 0.9em; color: var(--text-muted); }
+.al-sel strong { color: var(--text); }
+.al-batch button:disabled { cursor: not-allowed; }
+/* Title vs description: two clearly different lines. */
+#al-defs-table td.al-title { max-width: 560px; }
+.al-title .al-name { display: block; font-weight: 600; color: var(--text); line-height: 1.35; }
+.al-title .al-desc { display: block; margin-top: 3px; font-size: 0.8em; font-weight: normal; color: var(--text-dim);
+                     white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 560px; }
+/* A pane's heading card (the tab strip attaches to it). */
+.al-pane-head, .al-pane-intro { font-size: 0.88em; color: var(--text-muted); }
+.al-pane-intro { margin-bottom: 14px; }
+/* Loading */
+td.al-loading { text-align: center; padding: 34px 12px; color: var(--text-muted); }
+.al-loading-sub { display: block; margin-top: 6px; font-size: 0.82em; color: var(--text-dim); }
+@media (max-width: 700px) {
+    .al-filters { grid-template-columns: 1fr; gap: 6px; }
+    .al-filter-label { padding-top: 6px; }
+    .al-bar, .al-batch { justify-content: flex-start; }
+}
+/* Clickable title: reads as text, not as a filled button. */
+.al-title button.al-name { display: block; padding: 0; margin: 0; border: none; background: none; box-shadow: none;
+    color: var(--text); font: inherit; font-weight: 600; text-align: left; line-height: 1.35; cursor: pointer; }
+.al-title button.al-name:hover { background: none; color: var(--accent); text-decoration: underline; }
+.al-title button.al-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.al-loading-block { text-align: center; padding: 30px 12px; color: var(--text-muted); }
+.al-chip-loading { font-size: 0.85em; color: var(--text-muted); padding: 4px 0; }
+.al-loading-sec { color: var(--text-dim); margin-left: 4px; }
+/* Detail dialog */
+.al-detail-card { position: relative; width: 760px; }
+.al-detail-card .u134 { z-index: 6; }
+.al-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 10px 18px; font-size: 0.92em; }
+.al-kv-k { color: var(--text-muted); font-weight: 600; white-space: nowrap; }
+.al-kv-v { min-width: 0; overflow-wrap: anywhere; }
+.al-d-desc { white-space: pre-wrap; }
+.al-d-code { display: inline-block; max-width: 100%; box-sizing: border-box; background: var(--hover-bg); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px;
+             font-size: 0.92em; white-space: pre-wrap; overflow-wrap: anywhere; }
+.al-d-sub { margin-top: 4px; }
+.al-d-json { margin-top: 16px; }
+.al-d-json pre { margin: 0; padding: 10px 14px; max-height: 320px; overflow: auto; font-size: 0.8em; }
+@media (max-width: 700px) { .al-kv { grid-template-columns: 1fr; gap: 2px 0; } .al-kv-v { margin-bottom: 8px; } }

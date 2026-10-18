@@ -143,6 +143,7 @@ function _unitFor(jobType) {
     // containing millions of messages.
     if (jobType === 'verify')  return t('unit_archives');
     if (jobType === 'cleanup') return t('unit_files');
+    if (jobType === 'alerting') return t('unit_definitions');
     return t('unit_records'); // export, import, default
 }
 function formatRecords(done, total, jobType) {
@@ -4318,6 +4319,7 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (path === '/op-audit') { loadAuditData(1); loadAuditStatus(); loadAuditNginxConfig(); startJobsPoll(loadAuditStatus); }
     else if (path === '/settings') loadSettingsPage();
     else if (path === '/reports') loadReportsPage();
+    else if (path === '/alerting') alInit();
 });
 
 // Re-translate dynamic JS-rendered content when language changes.
@@ -4345,6 +4347,8 @@ document.addEventListener('langchange', () => {
         loadSettingsPage();
     } else if (path === '/reports') {
         loadReportsPage();
+    } else if (path === '/alerting') {
+        alRenderAll();
     }
 });
 

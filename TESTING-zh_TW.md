@@ -656,6 +656,52 @@ GL_PASS='<graylog-admin-密碼>' bash scripts/e2e-archive-test.sh
 - [ ] `login.html`／`index.html` 中每個 `type="password"` 欄位與登入表單都有 `autocomplete="off"`（`tests/test_password_autocomplete.py`）。
       可用 `curl -sk https://<host>:8990/login | grep -E '<form|type="password"'` 確認。
 
+### 告警管理：批次管理 Graylog 事件定義與通知方式（v1.17.0）
+
+寫入會直接改到真實的 Graylog，所以兩個實機層級都只能對「測試用」Graylog（.83）執行，絕不能對正式環境。
+UI 測試用的 jt-glogarch 也必須指向那台測試 Graylog（在任何主機上用一份暫時的設定檔即可；`.36` 指向的是正式的 log4）。
+
+**自動化**
+
+- [ ] `tests/test_alerting.py`（32 項）：
+      - 規劃：加入／移除／替換時，其他通知項目與它們的 `notification_parameters` 保持不變；
+      - `schedule` 參數等於定義目前的狀態；
+      - 預覽後被修改的定義會略過，期間被改的其他欄位會保留；
+      - 單筆失敗不影響其他筆；登入過期會停止整個批次；可以取消；
+      - Graylog 存成不同狀態時視為失敗；
+      - 復原，包括「已送出但未確認」的變更也能復原；
+      - 真正的 HTTP 用戶端：查詢參數、整份內容、`X-Requested-By`、401／403 對應、超過 200 筆的分頁；
+      - 身分存放：機密不進 cookie、會過期、登出會清除；登入時保留的是 Graylog 工作階段而不是密碼；
+      - API：一律回 403＋`need_signin`，從不回 401；一份預覽只能套用一次，且只限產生它的瀏覽器工作階段；拒絕不存在的通知方式；復原；
+      - 以 node 執行真正的 `alerting.js` 篩選邏輯：同時符合、`-` 排除、詞組、`notif:`／`notif:none`／`tag:`／`prio:`／`state:`、快速篩選、Shift 範圍選取，且快速篩選的數字與健檢的數字一致。
+- [ ] `GL_URL=http://<測試-graylog>:9000 GL_PASS=... python3 scripts/e2e-alerting-test.py` 顯示 `RESULT: ALL PASS`，內容是 30 個真實定義（其中 12 個停用）：
+      - 全部加入通知：狀態不變，其他欄位逐位元組相同；
+      - 預覽與套用之間被修改的定義會略過；
+      - 替換通知；
+      - 復原後完全回到原狀；
+      - Graylog 系統內建定義從不被寫入；
+      - Reader 角色的使用者改不了任何東西；
+      - 結束後清理。
+- [ ] `UI_URL=https://<指向測試-graylog 的-jt-glogarch>:8990 GL_URL=... GL_PASS=... RESTART_CMD='...' python3 scripts/ui-alerting-test.py` 顯示 `RESULT: ALL PASS`，全程真實點擊：
+      - 用 Graylog 帳號登入；
+      - 標籤、搜尋、Shift 點選、全選符合的結果；
+      - 加入 → 預覽 → 套用，並「在 Graylog 中」確認結果：15 個都有新通知、另一個標籤的定義沒被動到、沒有狀態被改變；
+      - 作業歷程有這筆作業；
+      - 載入中狀態：攔住資料請求，確認工具列與表格有 spinner、每個 spinner 真的在轉、轉動的弧線與底圈對比足夠（≥ 2）、動作按鈕不能按；
+      - 版面：工具列項目在同一條中線上、篩選標題在同一欄、每個分頁都以卡片承接頁籤、標題與描述的樣式不同；
+      - 點選標題會開啟即時讀取的定義內容，並有連到 Graylog 的連結；
+      - 從「變更紀錄」復原；
+      - 健檢卡片、繁體中文；
+      - 服務重新啟動後，頁面會要求重新登入 Graylog，且對話框可正常登入；
+      - 沒有 JS 錯誤。
+
+**人工（每次改到告警管理的版本）**
+
+- [ ] 淺色＋深色主題、en／zh-TW／ja、400 px 寬的視窗：外觀與其他頁面一致（工具列卡片、分頁、表格、分頁按鈕）。
+- [ ] 以 `localadmin` 登入：頁面要求登入 Graylog；之後的變更以那個 Graylog 使用者執行，稽核記錄兩者都列出。
+- [ ] 沒有編輯權限的 Graylog 使用者：預覽可以載入，套用會在第一個定義停下並顯示「Graylog 拒絕你的帳號執行此操作」。
+- [ ] 登出會關閉 Graylog 工作階段（`DELETE /api/system/sessions/{id}`）。
+
 ### 測試結果
 
 - [ ] `./scripts/run-tests.sh` 通過 — `TEST-RESULTS.md` 已產生

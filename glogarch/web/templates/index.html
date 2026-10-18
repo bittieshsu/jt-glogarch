@@ -24,6 +24,7 @@
             <li><a href="/logs" class="{% if page == 'logs' %}active{% endif %}" data-i18n="nav_logs" data-icon="log"><span>Sys Logs</span></a></li>
             <li><a href="/op-audit" class="{% if page == 'op-audit' %}active{% endif %}" data-i18n="nav_op_audit" data-icon="shield"><span>Operation Audit</span></a></li>
             <li><a href="/reports" class="{% if page == 'reports' %}active{% endif %}" data-i18n="nav_reports" data-icon="report"><span>Reports</span></a></li>
+            <li><a href="/alerting" class="{% if page == 'alerting' %}active{% endif %}" data-i18n="nav_alerting" data-icon="warning"><span>Alerting</span></a></li>
             <li><a href="/settings" class="{% if page == 'settings' %}active{% endif %}" data-i18n="nav_settings" data-icon="settings"><span>Settings</span></a></li>
         </ul>
         <div id="sidebar-job-status" class="sidebar-job-status hidden">
@@ -1036,6 +1037,174 @@
             </div>
         </div>
 
+        {% elif page == 'alerting' %}
+        <h1 data-i18n="page_alerting" data-icon="warning">Alerting</h1>
+        <div class="text-muted fs-085 mb15" data-i18n="al_subtitle">Graylog event definitions and notifications, managed in bulk.</div>
+
+        <!-- Which Graylog, and who the changes are made as. Changes always run
+             as the logged-in user's own Graylog account (never the service
+             account in config.yaml), so say whose account it is up front. -->
+        <div class="card mb15 al-toolbar">
+            <div class="al-bar">
+                <div class="al-bar-left">
+                    <label class="al-inline-label" for="al-server" data-i18n="al_server">Graylog</label>
+                    <select id="al-server" data-act-change="alServerChange"></select>
+                    <span class="al-who" id="al-who"><span class="spinner-text" data-i18n="loading">Loading</span></span>
+                </div>
+                <div class="al-bar-right">
+                    <span class="al-fetched" id="al-fetched"></span>
+                    <button class="btn-secondary btn-sm" id="al-reload" data-act="alReload" data-i18n="btn_refresh" data-icon="refresh">Refresh</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="arch-tabs" id="al-tabs">
+            <button class="arch-tab active" data-act="alTab" data-arg="defs" data-i18n="al_tab_defs" data-icon="warning">Event definitions</button>
+            <button class="arch-tab" data-act="alTab" data-arg="notifs" data-i18n="al_tab_notifs" data-icon="bell">Notifications</button>
+            <button class="arch-tab" data-act="alTab" data-arg="health" data-i18n="al_tab_health" data-icon="shield">Health check</button>
+            <button class="arch-tab" data-act="alTab" data-arg="changes" data-i18n="al_tab_changes" data-icon="clock">Change history</button>
+        </div>
+
+        <div id="al-pane-defs">
+            <div class="card mb15">
+                <div class="al-filters">
+                    <div class="al-filter-label" data-i18n="al_quick">Quick filters</div>
+                    <div class="al-chips" id="al-presets"></div>
+                    <div class="al-filter-label al-tags-row" data-i18n="al_tags">Title tags</div>
+                    <div class="al-chips al-tags-row" id="al-tags"></div>
+                    <div class="al-filter-label al-filter-label-input" data-i18n="al_search_label">Search</div>
+                    <div class="al-search">
+                        <div class="al-search-line">
+                            <input type="text" id="al-q" autocomplete="off" data-act-input="alQueryInput"
+                                   data-i18n-placeholder="al_search_ph" placeholder="checkpoint -notif:Zulip">
+                            <button class="btn-secondary" data-act="alClearFilters" data-i18n="al_clear_filters" data-icon="close">Clear filters</button>
+                        </div>
+                        <div class="al-search-hint" data-i18n="al_search_hint"></div>
+                        <details class="search-help" id="al-search-help">
+                            <summary data-i18n="al_help_title">How to search</summary>
+                            <div class="search-help-list">
+                                <div><code>checkpoint fsoc</code></div>
+                                <div class="shelp-desc" data-i18n="al_help_1">both words appear (title, description or query)</div>
+                                <div><code>"VM Crash"</code></div>
+                                <div class="shelp-desc" data-i18n="al_help_2">the exact phrase</div>
+                                <div><code>-test</code></div>
+                                <div class="shelp-desc" data-i18n="al_help_3">does not contain test</div>
+                                <div><code>notif:Zulip</code> &nbsp; <code>-notif:Zulip</code></div>
+                                <div class="shelp-desc" data-i18n="al_help_4">has / does not have the Zulip notification</div>
+                                <div><code>notif:none</code></div>
+                                <div class="shelp-desc" data-i18n="al_help_5">has no notification at all</div>
+                                <div><code>tag:F5</code> &nbsp; <code>prio:3</code> &nbsp; <code>state:disabled</code></div>
+                                <div class="shelp-desc" data-i18n="al_help_6">title tag, priority (1 low, 2 normal, 3 high), enabled / disabled</div>
+                            </div>
+                        </details>
+                    </div>
+                </div>
+                <div class="al-batch" id="al-batch">
+                    <div class="al-batch-actions">
+                        <button class="btn-primary" data-act="alOpenAction" data-arg="add" data-i18n="al_btn_add" data-icon="plus">Add notification</button>
+                        <button class="btn-secondary" data-act="alOpenAction" data-arg="remove" data-i18n="al_btn_remove" data-icon="close">Remove notification</button>
+                        <button class="btn-secondary" data-act="alOpenAction" data-arg="replace" data-i18n="al_btn_replace" data-icon="refresh">Replace notification</button>
+                    </div>
+                    <div class="al-batch-sel">
+                        <span class="al-sel" id="al-sel-count"></span>
+                        <button class="btn-secondary btn-sm" data-act="alSelectAllMatching" data-i18n="al_select_matching" data-icon="check">Select all matching</button>
+                        <button class="btn-secondary btn-sm" data-act="alClearSelection" data-i18n="al_clear_selection" data-icon="close">Clear selection</button>
+                    </div>
+                </div>
+            </div>
+            <table id="al-defs-table">
+                <thead><tr>
+                    <th class="u156"><input type="checkbox" id="al-page-all" data-act="alTogglePage" data-act-event></th>
+                    <th data-i18n="al_th_title">Title</th>
+                    <th data-i18n="al_th_priority">Priority</th>
+                    <th data-i18n="th_status">Status</th>
+                    <th data-i18n="al_th_notifications">Notifications</th>
+                    <th data-i18n="al_th_matched">Last matched</th>
+                </tr></thead>
+                <tbody><tr><td class="al-loading" colspan="6"><span class="spinner-text" data-i18n="al_loading_defs">Loading event definitions from Graylog</span></td></tr></tbody>
+            </table>
+            <div class="pagination" id="al-defs-pagination"></div>
+        </div>
+
+        <!-- Every pane opens with a card: the tab strip needs a panel to attach
+             to, or the active tab floats over the table with nothing under it. -->
+        <div id="al-pane-notifs" class="is-hidden">
+            <div class="card mb15 al-pane-head"><span data-i18n="al_notifs_intro"></span></div>
+            <table id="al-notifs-table">
+                <thead><tr>
+                    <th data-i18n="al_th_title">Title</th>
+                    <th data-i18n="th_type">Type</th>
+                    <th data-i18n="al_th_description">Description</th>
+                    <th data-i18n="al_th_used_by">Used by</th>
+                    <th data-i18n="th_actions">Actions</th>
+                </tr></thead>
+                <tbody><tr><td class="al-loading" colspan="5"><span class="spinner-text" data-i18n="loading">Loading</span></td></tr></tbody>
+            </table>
+        </div>
+
+        <div id="al-pane-health" class="is-hidden">
+            <div class="card mb15">
+                <div class="al-pane-intro" data-i18n="al_health_intro"></div>
+                <div id="al-health"></div>
+            </div>
+        </div>
+
+        <div id="al-pane-changes" class="is-hidden">
+            <div class="card mb15 al-pane-head"><span data-i18n="al_changes_intro"></span></div>
+            <table id="al-changes-table">
+                <thead><tr>
+                    <th data-i18n="th_time">Time</th>
+                    <th data-i18n="al_th_user">User</th>
+                    <th data-i18n="al_th_change">Change</th>
+                    <th data-i18n="al_th_result">Result</th>
+                    <th data-i18n="th_actions">Actions</th>
+                </tr></thead>
+                <tbody></tbody>
+            </table>
+        </div>
+
+        <!-- One dialog for every bulk change: choose → preview → apply. The
+             preview comes from the server, which keeps the exact plan; Apply
+             runs that plan and nothing else. -->
+        <div id="al-action-modal" class="modal-overlay hidden">
+            <div class="modal-card modal-wide">
+                <h3 id="al-action-title"></h3>
+                <div id="al-action-form"></div>
+                <div id="al-action-preview"></div>
+                <div class="u048" id="al-action-buttons"></div>
+            </div>
+        </div>
+
+        <!-- One event definition, read live from Graylog when its title is clicked. -->
+        <div id="al-detail-modal" class="modal-overlay hidden">
+            <div class="modal-card modal-wide al-detail-card">
+                <button class="u134" data-act="alCloseDetail" title="Close" data-i18n-title="btn_close">&times;</button>
+                <h3 id="al-detail-title"></h3>
+                <div id="al-detail-body"></div>
+                <div class="u048" id="al-detail-buttons"></div>
+            </div>
+        </div>
+
+        <div id="al-signin-modal" class="modal-overlay hidden">
+            <div class="modal-card">
+                <h3 data-i18n="al_signin_title" data-icon="lock">Sign in to Graylog</h3>
+                <p class="u028" id="al-signin-why"></p>
+                <div class="form-group">
+                    <label data-i18n="monitor_username">Username</label>
+                    <input type="text" id="al-signin-user" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label data-i18n="monitor_password">Password</label>
+                    <input type="password" id="al-signin-pass" autocomplete="off">
+                </div>
+                <div class="u048">
+                    <button class="btn-primary" data-act="alSignin" data-i18n="btn_login" data-icon="login">Login</button>
+                    <button class="btn-secondary" data-act="alCloseSignin" data-i18n="btn_cancel" data-icon="close">Cancel</button>
+                    <span id="al-signin-result"></span>
+                </div>
+            </div>
+        </div>
+
         {% elif page == 'settings' %}
         <h1 data-i18n="page_settings" data-icon="settings">System Settings</h1>
         <div class="u025" data-i18n="settings_subtitle">Connection settings are applied live — no restart needed.</div>
@@ -1154,5 +1323,6 @@ sudo bash upgrade-offline.sh</pre>
 
     <script src="/static/js/i18n.js?v={{ version }}"></script>
     <script src="/static/js/app.js?v={{ version }}"></script>
+    <script src="/static/js/alerting.js?v={{ version }}"></script>
 </body>
 </html>

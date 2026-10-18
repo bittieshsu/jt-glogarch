@@ -222,9 +222,11 @@ def create_app() -> FastAPI:
     from glogarch.web.routes.api import router as api_router
     from glogarch.web.routes.search import router as search_router
     from glogarch.web.routes.pages import router as pages_router
+    from glogarch.web.routes.alerting import router as alerting_router
 
     app.include_router(api_router, prefix="/api")
     app.include_router(search_router, prefix="/api")
+    app.include_router(alerting_router, prefix="/api")
     app.include_router(pages_router)
 
     return app

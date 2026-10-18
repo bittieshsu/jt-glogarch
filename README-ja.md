@@ -1,4 +1,4 @@
-# jt-glogarch v1.16.5
+# jt-glogarch v1.17.0
 
 **Language**: [English](README.md) | [繁體中文](README-zh_TW.md) | **日本語**  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Graylog Open（6.x / 7.x）向けのログのアーカイブ・リストアツール
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.16.5-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.17.0-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 > **作者：** Jason Cheng（[Jason Tools](https://github.com/jasoncheng7115)）
@@ -173,9 +173,19 @@ Telegram・Discord・Slack・Microsoft Teams・Nextcloud Talk・Email（SMTP）�
 ### Web UI
 
 ダッシュボード、アーカイブ一覧（タイムライン、絞り込み、一括インポート・削除）、レコード検索、
-タスクログ（リアルタイム進捗、キャンセル）、スケジュール、通知設定、システムログ、操作監査、
+タスクログ（リアルタイム進捗、キャンセル）、スケジュール、通知設定、システムログ、操作監査、アラート管理、
 レポート、設定の各画面を備えています。ライト / ダークテーマ、English / 繁體中文 / 日本語 に対応しています。
 ログインには Graylog のアカウントを使います（別途ユーザー管理は不要です）。
+
+### アラート管理（v1.17.0 以降）
+
+Graylog のイベント定義と通知を一括で管理します。クイックフィルター、タイトルのタグ（`[ベンダー]`／`製品 - `）、
+複数キーワード検索（`checkpoint -notif:Zulip`）、Shift クリックでの範囲選択と「一致するものをすべて選択」のあと、
+数百件の定義に通知をまとめて追加・削除・置き換えできます。変更は必ずプレビューしてから適用し、各定義の有効／無効は
+そのまま保たれ、プレビュー後に Graylog で変更された定義はスキップされます。タスクログのジョブとして実行され、
+「変更履歴」から元に戻せます。ヘルスチェックでは、有効なのに誰にも通知されない定義、削除済み・未使用の通知、
+一度も（または長期間）一致していない定義を一覧にします。変更はログインしたユーザー自身の Graylog アカウントで
+行われ（その権限が適用されます）、パスワードはログイン時に Graylog セッションに交換され、保存されません。
 
 ### オフライン（閉域）環境への導入
 

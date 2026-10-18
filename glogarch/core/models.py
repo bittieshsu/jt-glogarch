@@ -27,6 +27,7 @@ class JobType(str, Enum):
     CLEANUP = "cleanup"
     VERIFY = "verify"
     REPORT = "report"
+    ALERTING = "alerting"
 
 
 class JobStatus(str, Enum):

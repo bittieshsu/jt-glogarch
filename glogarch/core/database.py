@@ -153,6 +153,29 @@ CREATE TABLE IF NOT EXISTS report_history (
     created_at   TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_report_hist ON report_history (report_id, created_at);
+
+-- Alerting (Graylog event definitions): one row per definition a batch touched,
+-- written BEFORE the change is sent, so a batch can be undone even after a
+-- crash mid-run. status: pending (sent or about to be) | applied | failed |
+-- restored (undone by a later batch).
+CREATE TABLE IF NOT EXISTS alerting_changes (
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+    batch_id             TEXT NOT NULL,
+    server               TEXT NOT NULL DEFAULT '',
+    definition_id        TEXT NOT NULL,
+    title                TEXT NOT NULL DEFAULT '',
+    action               TEXT NOT NULL DEFAULT '',
+    before_notifications TEXT NOT NULL DEFAULT '[]',
+    after_notifications  TEXT NOT NULL DEFAULT '[]',
+    status               TEXT NOT NULL DEFAULT 'pending',
+    error                TEXT,
+    username             TEXT NOT NULL DEFAULT '',
+    undoes_batch         TEXT,
+    created_at           TEXT NOT NULL,
+    updated_at           TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_alerting_batch ON alerting_changes (batch_id);
+CREATE INDEX IF NOT EXISTS idx_alerting_server ON alerting_changes (server, created_at);
 """
 
 
@@ -1193,6 +1216,61 @@ class ArchiveDB:
             except Exception:
                 self._rollback_safely()
                 raise
+
+    # --- Alerting change log ------------------------------------------------
+
+    def add_alerting_change(self, batch_id: str, server: str, definition_id: str, title: str,
+                            action: str, before: list, after: list, username: str,
+                            undoes_batch: str | None = None) -> int:
+        import json as _json
+        with self._lock:
+            try:
+                cur = self.conn.execute(
+                    """INSERT INTO alerting_changes (batch_id, server, definition_id, title, action,
+                       before_notifications, after_notifications, status, username, undoes_batch,
+                       created_at) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)""",
+                    (batch_id, server, definition_id, title, action, _json.dumps(before),
+                     _json.dumps(after), username, undoes_batch, _dt_to_str(datetime.utcnow())))
+                self.conn.commit()
+                return cur.lastrowid  # type: ignore[return-value]
+            except Exception:
+                self._rollback_safely()
+                raise
+
+    def set_alerting_change(self, row_id: int, status: str, error: str | None = None) -> None:
+        from glogarch.utils.sanitize import sanitize
+        with self._lock:
+            try:
+                self.conn.execute(
+                    "UPDATE alerting_changes SET status = ?, error = ?, updated_at = ? WHERE id = ?",
+                    (status, sanitize(error) if error else None, _dt_to_str(datetime.utcnow()), row_id))
+                self.conn.commit()
+            except Exception:
+                self._rollback_safely()
+                raise
+
+    def list_alerting_changes(self, batch_id: str) -> list[dict]:
+        import json as _json
+        rows = self.conn.execute(
+            "SELECT * FROM alerting_changes WHERE batch_id = ? ORDER BY id", (batch_id,)).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["before_notifications"] = _json.loads(d["before_notifications"] or "[]")
+            d["after_notifications"] = _json.loads(d["after_notifications"] or "[]")
+            out.append(d)
+        return out
+
+    def list_alerting_batches(self, server: str, limit: int = 50) -> list[dict]:
+        rows = self.conn.execute(
+            """SELECT batch_id, MIN(created_at) AS created_at, MAX(username) AS username,
+                      MAX(action) AS action, MAX(undoes_batch) AS undoes_batch,
+                      SUM(status = 'applied') AS applied, SUM(status = 'pending') AS pending,
+                      SUM(status = 'failed') AS failed, SUM(status = 'restored') AS restored,
+                      COUNT(*) AS total
+               FROM alerting_changes WHERE server = ?
+               GROUP BY batch_id ORDER BY MIN(id) DESC LIMIT ?""", (server, limit)).fetchall()
+        return [dict(r) for r in rows]
 
     def list_report_history(self, limit: int = 50) -> list[dict]:
         rows = self.conn.execute(

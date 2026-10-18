@@ -135,6 +135,8 @@ async def login_submit(request: Request):
                         display_name = "token-user"
                     request.session["authenticated"] = True
                     request.session["username"] = display_name
+                    request.session["gl_server"] = server.name
+                    await _remember_graylog_identity(request, server, username, password)
                     _audit(request, "login_success", f"User: {display_name} @ {server.name}")
                     return RedirectResponse(url="/", status_code=303)
                 # This server responded but rejected the credentials — Graylog is
@@ -167,9 +169,45 @@ def _audit(request: Request, action: str, detail: str = ""):
         log.warning("Audit record could not be written - this operation is NOT in the audit log", error=str(e))
 
 
+async def _remember_graylog_identity(request: Request, server, username: str, password: str) -> None:
+    """Keep who this user is on Graylog, so Alerting changes are made AS them.
+
+    The password is exchanged for a Graylog session right here and then dropped;
+    a token login keeps the token. Memory only (see web/gl_identity.py). A
+    failure never blocks the login — the Alerting page asks to sign in instead.
+    """
+    from glogarch.graylog import alerting as gla
+    from glogarch.web import gl_identity
+    host = request.client.host if request.client else ""
+    try:
+        d = await gla.create_session(server.url, username, password, server.verify_ssl, host)
+        gl_identity.put(request.session, server.name, gl_identity.Identity(
+            kind="session", secret=d["session_id"], username=d.get("username") or username,
+            server_url=server.url, verify_ssl=server.verify_ssl,
+            expires_at=gl_identity.parse_valid_until(d.get("valid_until"))))
+        return
+    except Exception as e:
+        log.info("No Graylog session for this login (token login, or sessions unavailable)",
+                 server=server.name, error=str(e))
+    if password == "token":  # nosec B105 - Graylog token auth: the password field is the literal word "token"
+        # Graylog token auth: the token is the username, "token" the password.
+        gl_identity.put(request.session, server.name, gl_identity.Identity(
+            kind="token", secret=username, username="token-user", server_url=server.url,
+            verify_ssl=server.verify_ssl, expires_at=gl_identity.parse_valid_until(None)))
+
+
 @router.get("/logout")
-def logout(request: Request):
+async def logout(request: Request):
+    from glogarch.graylog import alerting as gla
+    from glogarch.web import gl_identity
     _audit(request, "logout")
+    for ident in gl_identity.drop_all(request.session):
+        if ident.kind != "session":
+            continue
+        try:
+            await gla.delete_session(ident.server_url, ident.secret, ident.verify_ssl)
+        except Exception as e:
+            log.info("Graylog session not closed at logout (it expires on its own)", error=str(e))
     request.session.clear()
     return RedirectResponse(url="/login", status_code=303)
 
@@ -250,6 +288,16 @@ def logs_page(request: Request):
     if not _is_logged_in(request):
         return RedirectResponse(url="/login", status_code=303)
     return _render("index.html", request, {"page": "logs"})
+
+
+@router.get("/alerting", response_class=HTMLResponse)
+def alerting_page(request: Request):
+    """Graylog event definitions + notifications, managed in bulk."""
+    if _is_unconfigured(request):
+        return RedirectResponse(url="/setup", status_code=303)
+    if not _is_logged_in(request):
+        return RedirectResponse(url="/login", status_code=303)
+    return _render("index.html", request, {"page": "alerting"})
 
 
 @router.get("/op-audit", response_class=HTMLResponse)

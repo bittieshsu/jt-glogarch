@@ -52,8 +52,10 @@ fi
 # reads the source. Policy and the LOW ratchet live in the script itself.
 # Exit 2 = not installed: report loudly, never pass silently (a security gate
 # that quietly does not run is worse than none).
-BANDIT_OUT=$(bash scripts/bandit-scan.sh 2>&1)
-BANDIT_RC=$?
+# `|| RC=$?`: under `set -e` a bare `X=$(failing)` exits the script right here,
+# silently, before the failure is printed (it hid a Bandit finding in 1.17.0).
+BANDIT_RC=0
+BANDIT_OUT=$(bash scripts/bandit-scan.sh 2>&1) || BANDIT_RC=$?
 echo "$BANDIT_OUT"
 if [ $BANDIT_RC -eq 1 ]; then
     echo "❌ BANDIT GATE FAILED — refusing to release."
@@ -67,8 +69,8 @@ fi
 # env, else localhost:8990. Hard-fails if reachable and broken; loud reminder if
 # no instance is reachable (can't fail the build on infra absence).
 UI_URL="${UI_SMOKE_URL:-https://localhost:8990}"
-UI_OUT=$(timeout 150 python3 scripts/ui-smoke.py "$UI_URL" ${UI_SMOKE_USER:+"$UI_SMOKE_USER" "$UI_SMOKE_PASS"} 2>&1)
-UI_RC=$?
+UI_RC=0
+UI_OUT=$(timeout 150 python3 scripts/ui-smoke.py "$UI_URL" ${UI_SMOKE_USER:+"$UI_SMOKE_USER" "$UI_SMOKE_PASS"} 2>&1) || UI_RC=$?
 if echo "$UI_OUT" | grep -q "RESULT: OK"; then
     echo "UI smoke ($UI_URL): OK"
     # A skipped layer must never read as a passed one.
@@ -102,15 +104,23 @@ FAILED=$(echo "$SUMMARY" | grep -oP '\d+ failed' || echo "")
 SKIPPED=$(echo "$SUMMARY" | grep -oP '\d+ skipped' || echo "")
 DURATION=$(echo "$SUMMARY" | grep -oP 'in [\d.]+s' || echo "")
 
+# Run version check. A hardcoded version is a release blocker, so it fails the
+# run like a failing test (it used to be written to TEST-RESULTS.md as FAIL while
+# the run still said ALL PASSED and exited 0).
+VERSION_OK=0
+VERSION_CHECK=$(./scripts/check-version.sh 2>&1) || VERSION_OK=$?
+if [ $VERSION_OK -ne 0 ] && [ $EXIT_CODE -eq 0 ]; then
+    EXIT_CODE=1
+    echo ""
+    echo "Version check FAILED:"
+    echo "$VERSION_CHECK" | head -20
+fi
+
 if [ $EXIT_CODE -eq 0 ]; then
     STATUS="✅ ALL PASSED"
 else
     STATUS="❌ FAILED"
 fi
-
-# Run version check
-VERSION_CHECK=$(./scripts/check-version.sh 2>&1)
-VERSION_OK=$?
 
 # Write results
 cat > "$RESULT_FILE" << EOF

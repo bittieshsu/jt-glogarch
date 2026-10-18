@@ -853,6 +853,57 @@ failure.
       `autocomplete="off"`, and so does the login form (`tests/test_password_autocomplete.py`).
       `curl -sk https://<host>:8990/login | grep -E '<form|type="password"'` shows it.
 
+### Alerting — Graylog event definitions + notifications in bulk (v1.17.0)
+
+Writes go to a REAL Graylog, so the two live layers run against a TEST Graylog
+(.83), never production. The jt-glogarch for the UI test must point at that test
+Graylog too (a scratch config on any box; `.36` points at production log4).
+
+**Automated**
+
+- [ ] `tests/test_alerting.py` (32) — planning (add / remove / replace keep the
+      other entries and their `notification_parameters`), the `schedule` value is
+      the definition's current state, a definition edited after the preview is
+      skipped, other fields edited meanwhile are kept, one failure does not stop
+      the rest, an expired sign-in stops the batch, cancel, Graylog storing a
+      different state counts as a failure, undo (and undo of a change that was
+      sent but never confirmed), the real HTTP client (query param, whole body,
+      `X-Requested-By`, 401/403 mapping, paging past 200), the identity store
+      (secret never in the cookie, expiry, logout), login keeps a Graylog session
+      and not the password, the API (403 + `need_signin` never 401, a plan runs
+      once and only for the browser session that made it, unknown notification
+      refused, undo), and node running the real `alerting.js` filters (AND, `-`,
+      phrases, `notif:` / `notif:none` / `tag:` / `prio:` / `state:`, presets,
+      shift-click range, quick-filter counts == health counts).
+- [ ] `GL_URL=http://<test-graylog>:9000 GL_PASS=... python3 scripts/e2e-alerting-test.py`
+      prints `RESULT: ALL PASS` — 30 real definitions (12 disabled): add to all
+      (no state change, every other field byte-identical), edit-between-preview-
+      and-apply skipped, replace, undo restores exactly, the Graylog system
+      definition is never written, a Reader-role user changes nothing, cleanup.
+- [ ] `UI_URL=https://<jt-glogarch-on-test-graylog>:8990 GL_URL=... GL_PASS=...
+      RESTART_CMD='...' python3 scripts/ui-alerting-test.py` prints
+      `RESULT: ALL PASS` — real clicks: log in with a Graylog account, tag chip,
+      search, shift-click, select all matching, Add → Preview → Apply, the result
+      checked IN GRAYLOG (all 15 have it, the other tag untouched, no state
+      changed), the loading state (data request held: spinner in the toolbar and
+      table, every spinner actually turning, its arc at contrast >= 2 against the
+      track, action buttons disabled), the layout (toolbar items on one centre
+      line, filter labels in one column, every tab pane opens with a card, title
+      and description styled differently), clicking a title opens the live
+      definition with a link into Graylog, Job History row, Undo from Change history, health cards, zh-TW,
+      and after a service restart the page asks to sign in again and the dialog
+      works. No JS errors.
+
+**By hand (each release that touches Alerting)**
+
+- [ ] Light + dark theme, en / zh-TW / ja, and a 400 px wide window: the page
+      looks like the other pages (toolbar card, tabs, table, pagination).
+- [ ] Log in as `localadmin`: the page asks to sign in to Graylog; changes then
+      run as that Graylog user, and the audit line names both.
+- [ ] A Graylog user without edit permission: the preview loads, Apply stops at
+      the first definition with "Graylog refused this for your account".
+- [ ] Logout closes the Graylog session (`DELETE /api/system/sessions/{id}`).
+
 ### Test Results
 
 - [ ] `./scripts/run-tests.sh` passes — `TEST-RESULTS.md` generated
