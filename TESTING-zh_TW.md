@@ -646,6 +646,16 @@ GL_PASS='<graylog-admin-密碼>' bash scripts/e2e-archive-test.sh
       重複資料刪除）；已送出訊息的 GELF 作業 → GELF，並警告會重複（GELF 不會帶 `gl2_message_id`，所以任何模式都無法略過已建立索引的訊息）。
 - [ ] 任何會開啟「另一頁」範本區塊中對話框的按鈕，都改成先切換到那一頁（`tests/test_retry_import_ui.py`）。
 
+### OS 直連匯出的涵蓋說明與 Graylog 內建 index set（v1.16.5）
+
+- [ ] 排程只選取放記錄的 index set：作業備註沒有 ⚠，並寫明「未包含 Graylog 內建事件索引集合：……」；作業歷程的標籤為綠色（`tests/test_index_set_coverage.py`）。
+- [ ] 漏選放記錄的 index set 時，仍顯示「⚠ ……未涵蓋」與黃色標籤。
+
+### 密碼自動完成（v1.16.5）
+
+- [ ] `login.html`／`index.html` 中每個 `type="password"` 欄位與登入表單都有 `autocomplete="off"`（`tests/test_password_autocomplete.py`）。
+      可用 `curl -sk https://<host>:8990/login | grep -E '<form|type="password"'` 確認。
+
 ### 測試結果
 
 - [ ] `./scripts/run-tests.sh` 通過 — `TEST-RESULTS.md` 已產生

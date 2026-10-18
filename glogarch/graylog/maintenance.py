@@ -191,13 +191,21 @@ class GraylogFlusher:
 _PROTECTED_PREFIXES = ("gl-events", "gl-system-events", "gl_system_events")
 
 
+def is_graylog_internal_prefix(prefix: str | None) -> bool:
+    """Graylog's own event index sets (Events / System Events). They hold
+    event-definition results and Graylog's system notifications, not ingested
+    logs. Blank is NOT internal here (callers that must fail closed check it)."""
+    p = (prefix or "").strip()
+    return bool(p) and any(p == q or p.startswith(q) for q in _PROTECTED_PREFIXES)
+
+
 class GraylogIndexCleaner(GraylogFlusher):
     """List / clear the indices of an index set on the import target."""
 
     @staticmethod
     def _is_protected(prefix: str) -> bool:
-        p = (prefix or "").strip()
-        return (not p) or any(p == q or p.startswith(q) for q in _PROTECTED_PREFIXES)
+        # Blank fails closed: never clear an index set we cannot identify.
+        return (not (prefix or "").strip()) or is_graylog_internal_prefix(prefix)
 
     @staticmethod
     def _iter_indices(payload: dict):

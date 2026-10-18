@@ -2950,7 +2950,13 @@ function coverageChip(job) {
     if (!r || r.index_sets_covered === undefined || r.index_sets_covered === null) return '';
     const skipped = r.index_sets_skipped || [];
     if (skipped.length === 0) {
-        return `<span class="cov-chip cov-ok" title="${t('job_cov_all_hint')}">&#10003; ${t('job_cov_all')}</span>`;
+        // Graylog's own Events / System Events sets hold no ingested logs, so
+        // leaving them out is still full coverage — green, named in the hint.
+        const internal = r.index_sets_internal || [];
+        const hint = internal.length
+            ? `${t('job_cov_internal_hint')}: ${esc(internal.join(', '))}`
+            : t('job_cov_all_hint');
+        return `<span class="cov-chip cov-ok" title="${hint}">&#10003; ${t('job_cov_all')}</span>`;
     }
     return `<span class="cov-chip cov-warn" title="${t('job_cov_partial_hint')}: ${esc(skipped.join(', '))}">&#9888; ${skipped.length} ${t('job_cov_partial')}</span>`;
 }

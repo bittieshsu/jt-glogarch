@@ -840,6 +840,19 @@ failure.
 - [ ] Any button that opens a dialog from ANOTHER page's template block navigates
       there instead (`tests/test_retry_import_ui.py`).
 
+### OS-direct coverage note and Graylog-internal index sets (v1.16.5)
+
+- [ ] A schedule that selects only the log index sets: the job note has no ⚠ and
+      says "Graylog internal event index sets not included: …"; the Job History
+      chip is green (`tests/test_index_set_coverage.py`).
+- [ ] A log index set left out still gets "⚠ … NOT covered" and an amber chip.
+
+### Password auto-completion (v1.16.5)
+
+- [ ] Every `type="password"` input in `login.html` / `index.html` has
+      `autocomplete="off"`, and so does the login form (`tests/test_password_autocomplete.py`).
+      `curl -sk https://<host>:8990/login | grep -E '<form|type="password"'` shows it.
+
 ### Test Results
 
 - [ ] `./scripts/run-tests.sh` passes — `TEST-RESULTS.md` generated

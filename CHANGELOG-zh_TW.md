@@ -2,6 +2,33 @@
 
 jt-glogarch 所有重要變更皆記錄於此檔案。
 
+## [1.16.5] - 2026-10-15
+
+### 修正
+
+- **OpenSearch Direct 匯出不再對 Graylog 內建的事件 index set 顯示警告。** 排程只選取放記錄的 index set
+  （例如 Default）時，每次執行都會出現「⚠ 2 個 index set 未涵蓋……NOT covered：Graylog Events, Graylog
+  System Events — their logs are not archived」，讓正常的每日匯出看起來像是遺漏了資料（客戶詢問）。這兩個
+  index set 是 Graylog 自己建立的，存放事件定義觸發的結果與 Graylog 的系統通知，不是收進來的記錄。現在改為
+  一般說明：「已涵蓋全部 N 個記錄索引集合；未包含 Graylog 內建事件索引集合：……」，作業歷程的標籤維持綠色，
+  並在提示文字列出這兩個 index set。放記錄、但沒有被選取的 index set 仍和以前一樣顯示 ⚠ 警告。判斷依據的
+  前置碼與「清空目標 index set」功能早已視為內建的相同（`gl-events`、`gl-system-events`）。舊版寫入的作業
+  紀錄保留原本的備註。
+
+### 安全性
+
+- **伺服器產生的頁面中，密碼欄位都設定 `autocomplete="off"`**：登入表單（帳號與密碼），以及匯入對話框中
+  目標 Graylog 與 OpenSearch 的帳號密碼。客戶的弱點掃描在 `/login` 回報「Web Server Allows Password
+  Auto-Completion」（低風險）。由瀏覽器指令碼產生的機密欄位（設定、通知、報表）原本就使用
+  `autocomplete="new-password"`，掃描工具看不到這些欄位，瀏覽器也不會自動填入。
+
+### 驗證
+
+- `tests/test_index_set_coverage.py`（新增 5 項）：內建 index set 與未涵蓋的分開回報；漏選真正放記錄的
+  index set 時，仍會和內建的一起正確警告；判斷規則與清空功能的保護規則相同；以 node 執行真正的 `coverageChip()`。
+- `tests/test_srv_messages.py`：客戶看到的舊備註與新備註都能翻譯成繁體中文與日文。
+- `tests/test_password_autocomplete.py`（2 項）；在 staging 上，所有登入後頁面送出的 HTML 中，沒有任何密碼欄位缺少 `autocomplete="off"`，且用真實瀏覽器登入仍正常。
+
 ## [1.16.4] - 2026-10-08
 
 ### 修正

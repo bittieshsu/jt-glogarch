@@ -24,6 +24,7 @@ from glogarch.export.exporter import (ExportResult, _ensure_naive, _is_cancellat
                                       backpressure_stop_summary,
                                       ExportCancelled, fire_progress_after_record)
 from glogarch.graylog.client import GraylogClient
+from glogarch.graylog.maintenance import is_graylog_internal_prefix
 from glogarch.graylog.system import SystemMonitor
 from glogarch.export.health_guard import BackpressureStop, HealthGuard
 from glogarch.opensearch.client import OpenSearchClient
@@ -158,6 +159,7 @@ class OpenSearchExporter:
             # this run will NOT cover (recorded on the result + logged as a warning).
             prefixes, skipped_index_sets = await self._resolve_prefixes(index_prefix, index_set_ids)
             result.index_sets_skipped = skipped_index_sets
+            result.index_sets_internal = list(getattr(self, "_internal_skipped", []))
             log.info("Index sets resolved for export", prefixes=prefixes,
                      covered=len(prefixes), skipped=skipped_index_sets)
 
@@ -440,6 +442,10 @@ class OpenSearchExporter:
                 note_parts.append(
                     f"⚠ Archived {len(prefixes)} index set(s); NOT covered: "
                     f"{', '.join(result.index_sets_skipped)} — their logs are not archived")
+            elif result.index_sets_internal:
+                note_parts.append(
+                    f"Covered all {len(prefixes)} log index set(s); Graylog internal "
+                    f"event index sets not included: {', '.join(result.index_sets_internal)}")
             else:
                 note_parts.append(f"Covered all {len(prefixes)} index set(s)")
             if result.chunks_skipped > 0:
@@ -469,6 +475,7 @@ class OpenSearchExporter:
                 result_json = _json.dumps({
                     "index_sets_covered": len(prefixes),
                     "index_sets_skipped": result.index_sets_skipped,
+                    "index_sets_internal": result.index_sets_internal,
                 })
             # A cancelled run is neither COMPLETED nor FAILED, and it did not
             # reach 100%. Leaving progress_pct out keeps the bar where the work
@@ -1047,11 +1054,21 @@ class OpenSearchExporter:
             prefixes = [iset["index_prefix"] for iset in valid]
 
         covered = set(prefixes)
-        skipped = [
-            (iset.get("title") or iset.get("id") or iset.get("index_prefix"))
-            for iset in valid
-            if iset["index_prefix"] not in covered
-        ]
+        skipped: list[str] = []
+        internal: list[str] = []
+        for iset in valid:
+            if iset["index_prefix"] in covered:
+                continue
+            name = iset.get("title") or iset.get("id") or iset.get("index_prefix")
+            # Graylog's own Events / System Events sets hold no ingested logs —
+            # leaving them out is not a coverage gap, so they do not go into the
+            # "NOT covered" warning (it fired on every run of a site that selected
+            # only its log index set, and read as a fault).
+            (internal if is_graylog_internal_prefix(iset["index_prefix"]) else skipped).append(name)
+        self._internal_skipped = internal
+        if internal:
+            log.info("Graylog-internal event index sets not selected (no ingested logs)",
+                     internal=internal)
         if skipped:
             log.warning(
                 "Index sets NOT covered by this OpenSearch export — their logs will "

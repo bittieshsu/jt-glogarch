@@ -186,6 +186,11 @@ class ExportResult:
         # in the default all-index-sets case). Surfaced so a partial export — e.g.
         # one deliberately restricted to specific index sets — is never silent.
         self.index_sets_skipped: list[str] = []
+        # Graylog's internal event index sets (Events / System Events) left out
+        # of a restricted run. Kept apart from `index_sets_skipped`: they hold no
+        # ingested logs, and counting them there put a "NOT covered" warning on
+        # every healthy run that selected only the log index sets.
+        self.index_sets_internal: list[str] = []
         # Was this run stopped by the operator? A cancel is NOT a failure and
         # NOT a success — reporting it as either is what made a cancelled run
         # finish as "completed, 100%, 0 records".

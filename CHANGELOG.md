@@ -2,6 +2,45 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.16.5] - 2026-10-15
+
+### Fixed
+
+- **OpenSearch Direct exports no longer warn about Graylog's own event index
+  sets.** A schedule that selects only the log index sets (for example Default)
+  put "⚠ 2 index set(s) not covered … NOT covered: Graylog Events, Graylog System
+  Events — their logs are not archived" on every run, so a healthy nightly export
+  looked like it was losing data (customer question). Those two sets are created by
+  Graylog itself and hold event-definition results and Graylog's system
+  notifications, not ingested logs. They now get a plain line instead: "Covered all
+  N log index set(s); Graylog internal event index sets not included: …", and the
+  Job History chip stays green and names them in its tooltip. An index set that
+  holds logs and was not selected still gets the ⚠ warning as before. The prefixes
+  are the same ones the "clear target index set" action already treats as internal
+  (`gl-events`, `gl-system-events`). Job rows written by older versions keep their
+  original note.
+
+### Security
+
+- **Password fields in the server-rendered pages set `autocomplete="off"`**: the
+  login form (username and password) and the import dialog's target Graylog and
+  OpenSearch credentials. A customer's vulnerability scan reported "Web Server
+  Allows Password Auto-Completion" (Low) on `/login`. Secret fields that the
+  browser script renders (Settings, notifications, reports) already use
+  `autocomplete="new-password"`, which scanners do not see and which also stops
+  browsers from filling them in.
+
+### Verified
+
+- `tests/test_index_set_coverage.py` (5 new): internal sets are reported apart from
+  skipped ones, a real log set left out still warns next to them, the prefix rule is
+  the same one the clear guard uses, and node runs the real `coverageChip()`.
+- `tests/test_srv_messages.py`: the customer's old note and the new note both
+  translate into zh-TW and ja.
+- `tests/test_password_autocomplete.py` (2); on staging, every logged-in page's served
+  HTML has no password input without `autocomplete="off"`, and a real browser login
+  still works.
+
 ## [1.16.4] - 2026-10-08
 
 ### Fixed
