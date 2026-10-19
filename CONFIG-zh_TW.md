@@ -315,6 +315,14 @@ notify:
     username: ""
     password: ""
 
+  zulip:
+    enabled: false
+    server_url: ""       # 例如 https://chat.example.com
+    bot_email: ""        # bot 的電子郵件（Zulip：個人設定 → Bots）
+    api_key: ""          # bot 的 API 金鑰（Web UI 中以遮罩顯示）
+    stream: ""           # bot 已加入的串流（頻道）
+    topic: "jt-glogarch"
+
   email:
     enabled: false
     smtp_host: ""

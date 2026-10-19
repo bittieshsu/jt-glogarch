@@ -2183,6 +2183,8 @@ def notify_status(request: Request):
         channels.append({"name": "teams", "enabled": True})
     if n.nextcloud_talk.enabled:
         channels.append({"name": "nextcloud_talk", "enabled": True})
+    if n.zulip.enabled:
+        channels.append({"name": "zulip", "enabled": True})
     if n.email.enabled:
         channels.append({"name": "email", "enabled": True})
     return {
@@ -2200,15 +2202,13 @@ def notify_status(request: Request):
 @router.post("/notify/test")
 async def test_notify(request: Request):
     """Send a test notification to all enabled channels (skips event type check)."""
-    from glogarch.notify.sender import _has_any_channel, _send_telegram, _send_discord, _send_slack, _send_teams, _send_nextcloud_talk, _send_email
-    import httpx
+    from glogarch.notify.sender import _has_any_channel, deliver_to_channels
     settings = _settings(request)
     config = settings.notify
 
     if not _has_any_channel(config):
         return {"results": [], "message": "No notification channels enabled"}
 
-    results = []
     timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
     # Use notification language from config
     if config.language == "zh-TW":
@@ -2220,21 +2220,9 @@ async def test_notify(request: Request):
     else:
         title = "Test Notification"
         body = "This is a test notification from jt-glogarch."
-    full_msg = f"[jt-glogarch] {title}\n{body}\n{timestamp}"
-
-    async with httpx.AsyncClient(timeout=15) as client:
-        if config.telegram.enabled:
-            results.append(await _send_telegram(client, config.telegram, full_msg))
-        if config.discord.enabled:
-            results.append(await _send_discord(client, config.discord, title, body, timestamp))
-        if config.slack.enabled:
-            results.append(await _send_slack(client, config.slack, title, body, timestamp))
-        if config.teams.enabled:
-            results.append(await _send_teams(client, config.teams, title, body, timestamp))
-        if config.nextcloud_talk.enabled:
-            results.append(await _send_nextcloud_talk(client, config.nextcloud_talk, full_msg))
-    if config.email.enabled:
-        results.append(await _send_email(config.email, title, body, timestamp))
+    # The same delivery path as a real notification, so a passing test means the
+    # real one is sent the same way.
+    results = await deliver_to_channels(config, title, body, timestamp)
 
     _audit(request, "notify_test_sent", f"channels={len(results) if isinstance(results, list) else 0}")
 
@@ -2461,6 +2449,9 @@ def get_notify_config(request: Request):
         "nextcloud_talk": {"enabled": n.nextcloud_talk.enabled, "server_url": n.nextcloud_talk.server_url,
                            "token": _mask(n.nextcloud_talk.token), "username": n.nextcloud_talk.username,
                            "password": _mask(n.nextcloud_talk.password)},
+        "zulip": {"enabled": n.zulip.enabled, "server_url": n.zulip.server_url,
+                  "bot_email": n.zulip.bot_email, "api_key": _mask(n.zulip.api_key),
+                  "stream": n.zulip.stream, "topic": n.zulip.topic},
         "email": {"enabled": n.email.enabled, "smtp_host": n.email.smtp_host, "smtp_port": n.email.smtp_port,
                   "smtp_tls": n.email.smtp_tls, "smtp_user": n.email.smtp_user,
                   "smtp_password": _mask(n.email.smtp_password),
@@ -2482,10 +2473,11 @@ async def save_notify_config(request: Request):
 
     channel_map = {
         "telegram": n.telegram, "discord": n.discord, "slack": n.slack,
-        "teams": n.teams, "nextcloud_talk": n.nextcloud_talk, "email": n.email,
+        "teams": n.teams, "nextcloud_talk": n.nextcloud_talk, "zulip": n.zulip,
+        "email": n.email,
     }
     # Secret fields that are masked in GET responses — skip if unchanged
-    _SECRET_FIELDS = {"bot_token", "webhook_url", "token", "password", "smtp_password"}
+    _SECRET_FIELDS = {"bot_token", "webhook_url", "token", "password", "smtp_password", "api_key"}
     # Outbound URLs must pass the same SSRF check as every other URL the UI
     # accepts (server test, OpenSearch test, import target, flush). This endpoint
     # was the one place that skipped it, so a notification channel could be

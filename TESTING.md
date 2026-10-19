@@ -79,7 +79,7 @@ the manual sections below = ship.
 | 5 | `test_repo_structure.py` | 8 | pyproject.toml at root, no src/ dir, deploy files, README/CHANGELOG/CONFIG exist, version sync, github/glogarch matches source |
 | 6 | `test_bulk_import.py` | 7 | Reserved field stripping, deflector alias, stream rewrite, marker field, dedup id/none |
 | 7 | `test_notify_format.py` | 23 | Status emoji (✅/⚠️/❌), per-line format, URL shortening, en/zh-TW key parity, column alignment by display width, full-width colons, Telegram HTML escaping, overflow local-time |
-| 8 | `test_notify_test_endpoint.py` | 7 | Discord/Slack/Teams/Telegram/Nextcloud Talk/Email send function params, test endpoint signature match |
+| 8 | `test_notify_test_endpoint.py` | 8 | Discord/Slack/Teams/Telegram/Nextcloud Talk/Zulip/Email send function params, the one shared channel list calls each correctly |
 | 9 | `test_field_schema.py` | 6 | Plain JSON passthrough, zlib round-trip, None/corrupted handling, DB store+read |
 | 10 | `test_multi_server.py` | 6 | Multi-server config, get-server-by-name, scheduler reads server, UI server selector, JS save/load server |
 | 11 | `test_database_datetime.py` | 5 | Naive/UTC/+08:00 round-trip, None passthrough, offset string parsing |
@@ -903,6 +903,34 @@ Graylog too (a scratch config on any box; `.36` points at production log4).
 - [ ] A Graylog user without edit permission: the preview loads, Apply stops at
       the first definition with "Graylog refused this for your account".
 - [ ] Logout closes the Graylog session (`DELETE /api/system/sessions/{id}`).
+
+### Zulip notification channel (v1.17.1)
+
+**Automated**
+
+- [ ] `tests/test_notify_zulip.py` (8): what goes on the wire, against a real httpx
+      client on a MockTransport — `POST {server}/api/v1/messages`, Basic auth with
+      the bot email + API key, form `type=stream`, `to`, `topic` (default
+      `jt-glogarch`), the body in a code fence; Zulip's own error text on 4xx
+      ("HTTP 401: Invalid API key"); missing settings fail without sending; a
+      message containing ``` cannot close the fence; real notifications AND "Send
+      test" go through the ONE channel list (`deliver_to_channels`); the settings API
+      masks the key, keeps it when the form posts the masked value, and refuses a
+      link-local server URL.
+- [ ] `tests/test_notify_test_endpoint.py`: `_send_zulip` signature, and the shared
+      channel list calls every channel with the right arguments.
+- [ ] `ui-sim-test.py` step 1b: the Zulip card is on Notify Settings, ticking
+      Enable shows its fields and unticking hides them (a channel that started
+      disabled — the case that was broken for every channel), only the API key is a
+      masked field (read-only, nothing is saved).
+
+**Manual (every release that touches notifications)**
+
+- [ ] Fill in a real Zulip bot (server URL, bot email, API key, stream), save, press
+      **Send test notification**: the message arrives in that stream/topic with the
+      title in bold and the body aligned; reload the page — the key is masked and
+      still works.
+- [ ] A wrong API key: the test result says "HTTP 401: Invalid API key".
 
 ### Test Results
 

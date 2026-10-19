@@ -1,4 +1,4 @@
-# jt-glogarch v1.17.0
+# jt-glogarch v1.17.1
 
 **Language**: [English](README.md) | [繁體中文](README-zh_TW.md) | **日本語**  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Graylog Open（6.x / 7.x）向けのログのアーカイブ・リストアツール
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.17.0-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.17.1-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 > **作者：** Jason Cheng（[Jason Tools](https://github.com/jasoncheng7115)）
@@ -167,7 +167,7 @@ jt-glogarch 自身で行った操作（アーカイブ削除、設定変更、�
 
 ### 通知
 
-Telegram・Discord・Slack・Microsoft Teams・Nextcloud Talk・Email（SMTP）の 6 チャネルに対応しています。
+Telegram・Discord・Slack・Microsoft Teams・Nextcloud Talk・Zulip・Email（SMTP）の 7 チャネルに対応しています。
 通知の言語は English / 繁體中文 / 日本語 から選択できます。
 
 ### Web UI
@@ -622,7 +622,7 @@ sudo -u jt-glogarch glogarch -c /opt/jt-glogarch/config.yaml import \
 ### 通知
 
 - **チャネル：** Telegram（Bot トークン、Chat ID）、Discord / Slack / Microsoft Teams（Webhook URL）、
-  Nextcloud Talk（サーバー URL、トークン、ユーザー名、パスワード）、Email（SMTP ホスト、ポート、TLS、
+  Nextcloud Talk（サーバー URL、トークン、ユーザー名、パスワード）、Zulip（サーバー URL、ボットのメールアドレス、API キー、ストリーム、トピック）、Email（SMTP ホスト、ポート、TLS、
   ユーザー、パスワード、送信元、宛先）。
 - **言語：** English / 繁體中文 / 日本語。テスト通知を含むすべての通知に適用されます。
 - **トリガー：** エクスポート完了、インポート完了、クリーンアップ完了、エラー、検証失敗、重要操作

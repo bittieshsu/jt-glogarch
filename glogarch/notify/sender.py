@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: AGPL-3.0-or-later
 # Copyright (C) 2026 Jason Cheng (Jason Tools)
-"""Notification sender — Telegram, Discord, Slack, Teams, Nextcloud Talk."""
+"""Notification sender — Telegram, Discord, Slack, Teams, Nextcloud Talk, Zulip, Email."""
 
 from __future__ import annotations
 
@@ -48,6 +48,7 @@ def _has_any_channel(config: NotifyConfig) -> bool:
         config.slack.enabled,
         config.teams.enabled,
         config.nextcloud_talk.enabled,
+        config.zulip.enabled,
         config.email.enabled,
     ])
 
@@ -71,8 +72,27 @@ async def send_notification(
     if not _has_any_channel(config):
         return []
 
-    results = []
     timestamp = datetime.now().astimezone().strftime("%Y-%m-%d %H:%M:%S %Z")
+    results = await deliver_to_channels(config, title, message, timestamp)
+
+    for r in results:
+        if r["success"]:
+            log.info("Notification sent", channel=r["channel"], notify_event=event.value)
+        else:
+            log.error("Notification failed", channel=r["channel"], error=r.get("error"))
+
+    return results
+
+
+async def deliver_to_channels(config: NotifyConfig, title: str, message: str,
+                              timestamp: str) -> list[dict]:
+    """Send one message to every enabled channel; one result dict per channel.
+
+    The ONLY place the channel list is walked. The test endpoint used to repeat
+    it, so every new channel had to be added twice and a missed copy meant "Send
+    test" silently skipped a channel that real notifications used (or the other
+    way round)."""
+    results = []
     # Blank line before the footer. Without it the send time is glued to the
     # last body line, and when that line is an indented bullet — the overflow
     # timestamps, the error list — the footer reads as one more list item.
@@ -94,15 +114,11 @@ async def send_notification(
         if config.nextcloud_talk.enabled:
             results.append(await _send_nextcloud_talk(client, config.nextcloud_talk, full_msg))
 
+        if config.zulip.enabled:
+            results.append(await _send_zulip(client, config.zulip, title, message, timestamp))
+
     if config.email.enabled:
         results.append(await _send_email(config.email, title, message, timestamp))
-
-    for r in results:
-        if r["success"]:
-            log.info("Notification sent", channel=r["channel"], notify_event=event.value)
-        else:
-            log.error("Notification failed", channel=r["channel"], error=r.get("error"))
-
     return results
 
 
@@ -217,6 +233,44 @@ async def _send_nextcloud_talk(client: httpx.AsyncClient, cfg, message: str) -> 
         return {"channel": "nextcloud_talk", "success": True}
     except Exception as e:
         return {"channel": "nextcloud_talk", "success": False, "error": str(e)}
+
+
+# --- Zulip ---
+
+def _zulip_content(title: str, message: str, ts: str) -> str:
+    """Zulip renders Markdown. The body goes in a code block so the padded stat
+    labels line up (the same reason Telegram uses <pre>) and so a log line full of
+    `*`, `_` or `#` is shown as written. The fence is longer than any backtick run
+    in the message, so a message containing ``` cannot close the block early."""
+    import re
+    longest = max((len(m) for m in re.findall(r"`+", message)), default=0)
+    fence = "`" * max(3, longest + 1)
+    return f"**[jt-glogarch] {title}**\n{fence}text\n{message}\n{fence}\n{ts}"
+
+
+async def _send_zulip(client: httpx.AsyncClient, cfg, title: str, message: str, ts: str) -> dict:
+    try:
+        if not (cfg.server_url and cfg.bot_email and cfg.api_key and cfg.stream):
+            raise RuntimeError("Zulip server URL / bot email / API key / stream not set")
+        resp = await client.post(
+            f"{cfg.server_url.rstrip('/')}/api/v1/messages",
+            auth=httpx.BasicAuth(cfg.bot_email, cfg.api_key),
+            data={"type": "stream", "to": cfg.stream,
+                  "topic": cfg.topic or "jt-glogarch",
+                  "content": _zulip_content(title, message, ts)},
+        )
+        if resp.status_code >= 400:
+            # Zulip says what is wrong ("Invalid API key", "Stream 'x' does not
+            # exist") — a bare "401" would leave the operator guessing.
+            try:
+                detail = str(resp.json().get("msg") or "")[:200]
+            except ValueError:
+                detail = resp.text[:200]
+            raise RuntimeError(f"HTTP {resp.status_code}: {detail}" if detail
+                               else f"HTTP {resp.status_code}")
+        return {"channel": "zulip", "success": True}
+    except Exception as e:
+        return {"channel": "zulip", "success": False, "error": str(e)}
 
 
 # --- Email (SMTP) ---

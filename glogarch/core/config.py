@@ -183,6 +183,15 @@ class NextcloudTalkConfig(BaseModel):
     password: str = ""
 
 
+class ZulipConfig(BaseModel):
+    enabled: bool = False
+    server_url: str = ""       # e.g. "https://chat.example.com"
+    bot_email: str = ""        # the bot's email address (Zulip API user)
+    api_key: str = ""          # the bot's API key
+    stream: str = ""           # stream (channel) name
+    topic: str = "jt-glogarch"
+
+
 class EmailConfig(BaseModel):
     enabled: bool = False
     smtp_host: str = ""
@@ -209,6 +218,7 @@ class NotifyConfig(BaseModel):
     slack: SlackConfig = Field(default_factory=SlackConfig)
     teams: TeamsConfig = Field(default_factory=TeamsConfig)
     nextcloud_talk: NextcloudTalkConfig = Field(default_factory=NextcloudTalkConfig)
+    zulip: ZulipConfig = Field(default_factory=ZulipConfig)
     email: EmailConfig = Field(default_factory=EmailConfig)
 
 

@@ -1,4 +1,4 @@
-# jt-glogarch v1.17.0
+# jt-glogarch v1.17.1
 
 **Language**: **English** | [繁體中文](README-zh_TW.md) | [日本語](README-ja.md)  
 **Website**: <https://jasoncheng7115.github.io/jt-glogarch/>
@@ -6,7 +6,7 @@
 **Graylog Open Archive** — Archive & restore logs for Graylog Open (6.x / 7.x)
 
 [![License](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-1.17.0-green.svg)]()
+[![Version](https://img.shields.io/badge/version-1.17.1-green.svg)]()
 [![Python](https://img.shields.io/badge/python-3.10%2B-blue.svg)]()
 
 Graylog Open does not include the Archive feature available in the Enterprise edition.
@@ -170,7 +170,7 @@ GELF mode also has:
 - **Record Search** — Search inside the archives themselves without restoring anything: pick a time range, match terms and field filters, matches highlighted in place, download the whole result set as CSV or JSON Lines
 - **Job History** — Real-time progress (SSE), elapsed time, cancel, source/mode badges
 - **Schedule Management** — Cron editor, inline progress, "Run Now"
-- **Notification Settings** — 6 channels with language selection
+- **Notification Settings** — 7 channels with language selection
 - **System Logs** — Real-time log viewer + audit log
 - **Operation Audit** — Track who did what on Graylog (60+ operation types, filterable, sensitive operation alerts)
 - **Reports (beta)** — Generate branded PDF reports from Graylog dashboards and archive statistics; "Generate" can take a one-off From/To for that run only, without changing the report (gradient cover, table of contents, KPI summary, header/footer/page numbers, CJK fonts). Scheduling + email delivery. Needs the optional render engine (headless Chromium): run `sudo bash scripts/install-report-engine.sh` to enable.
@@ -181,7 +181,7 @@ GELF mode also has:
 
 ### Notifications
 
-Telegram • Discord • Slack • Microsoft Teams • Nextcloud Talk • Email (SMTP)
+Telegram • Discord • Slack • Microsoft Teams • Nextcloud Talk • Zulip • Email (SMTP)
 
 Triggers: export complete, import complete, cleanup complete, errors, verification failed, sensitive operations, audit alerts.
 Messages in English / Traditional Chinese / Japanese.
@@ -1024,6 +1024,7 @@ collapses the channel's settings to keep the page tidy.
 | Slack | Webhook URL |
 | Microsoft Teams | Webhook URL |
 | Nextcloud Talk | Server URL, Token, Username, Password |
+| Zulip | Server URL, Bot email, Bot API key, Stream (Topic optional, default `jt-glogarch`) |
 | Email (SMTP) | Host, Port, TLS, User, Password, From, To |
 
 Click **Send test notification** to verify all enabled channels work. Test messages

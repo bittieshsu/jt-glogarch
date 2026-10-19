@@ -2,6 +2,40 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.17.1] - 2026-10-19
+
+### Added
+
+- **Zulip notification channel.** Notify Settings has a Zulip card: server URL, bot
+  email, bot API key, stream and topic (default `jt-glogarch`). Messages go to
+  `POST /api/v1/messages` as the bot; the title is bold and the body sits in a code
+  block so the stat columns stay aligned. Only the API key is masked; it is kept
+  when the form is saved unchanged, and the server URL gets the same SSRF check as
+  the other channels. A failed send shows Zulip's own reason, e.g.
+  "HTTP 401: Invalid API key", in the test result and the log.
+
+### Fixed
+
+- **Ticking "Enabled" on a notification channel that was off now shows its
+  fields.** A disabled channel's fields are hidden by a CSS attribute rule (it
+  replaced an inline `display:none` for the CSP), and the toggle only changed the
+  inline style, which cannot override that rule — so Discord, Slack, Teams,
+  Nextcloud Talk or Email could not be filled in from the page once they had been
+  saved as off. Caught by the new UI check for the Zulip card.
+
+### Changed
+
+- **Real notifications and "Send test notification" use one channel list.** The
+  test endpoint had its own copy of the list, so a new channel had to be added in
+  two places and a missed copy would make the test skip a channel that real
+  notifications use. Both now call `deliver_to_channels()`. The test message also
+  gets the same blank line before the send time as a real one.
+
+### Verified
+
+- `tests/test_notify_zulip.py` (8, new) and `tests/test_notify_test_endpoint.py`;
+  `ui-sim-test.py` step 1b checks the Zulip card in a real browser.
+
 ## [1.17.0] - 2026-10-18
 
 ### Added

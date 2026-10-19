@@ -71,6 +71,27 @@ async def main():
             check(f"page {path}", len(errs) == n0 and len(body.strip()) > 50,
                   "; ".join(errs[n0:][:2]) or f"{len(body)} chars")
 
+        # 1b) notification channels: the Zulip card (v1.17.0). Read-only - nothing
+        # is saved. Only the API key is masked; URL, bot email, stream and topic
+        # are plain fields (only actual secrets are masked).
+        await pg.goto(f"{BASE}/notify-settings", wait_until="networkidle")
+        await pg.wait_for_selector("#nf-zulip-enabled", timeout=10000)
+        was_on = await pg.is_checked("#nf-zulip-enabled")
+        if not was_on:
+            await pg.click("#nf-zulip-enabled")
+        check("notify: Zulip fields show when enabled", await pg.is_visible("#nf-zulip-server")
+              and await pg.is_visible("#nf-zulip-key"))
+        types = await pg.evaluate("""() => ['server', 'email', 'key', 'stream', 'topic']
+            .map(k => document.getElementById('nf-zulip-' + k).type)""")
+        check("notify: only the Zulip API key is masked",
+              types == ["text", "text", "password", "text", "text"], str(types))
+        if not was_on:
+            await pg.click("#nf-zulip-enabled")
+            # A channel that STARTED disabled is the case that broke: its fields
+            # are hidden by an attribute, and the toggle used to set style only.
+            check("notify: unticking Enable hides the fields again",
+                  not await pg.is_visible("#nf-zulip-server"))
+
         # 2) import dialog end to end (what the user actually sees)
         await pg.goto(f"{BASE}/archives", wait_until="networkidle")
         await pg.wait_for_timeout(1200)

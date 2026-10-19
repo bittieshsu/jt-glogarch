@@ -54,7 +54,7 @@ bash scripts/release-check.sh        # ALL PASS 即可出貨
 | 5 | `test_repo_structure.py` | 8 | pyproject.toml 在根目錄、無 src/ 目錄、deploy 檔案、README/CHANGELOG/CONFIG 存在、版號同步、github/glogarch 與 source 一致 |
 | 6 | `test_bulk_import.py` | 7 | 保留欄位剝除、deflector alias、stream 改寫、marker 欄位、dedup id/none |
 | 7 | `test_notify_format.py` | 23 | 狀態 emoji（✅/⚠️/❌）、每行一項、URL 縮短、en/zh-TW key 一致、依顯示寬度對齊、全形冒號、Telegram HTML 跳脫、溢出時間本地化 |
-| 8 | `test_notify_test_endpoint.py` | 7 | Discord/Slack/Teams/Telegram/Nextcloud Talk/Email 送出函式參數、測試端點簽名匹配 |
+| 8 | `test_notify_test_endpoint.py` | 8 | Discord/Slack/Teams/Telegram/Nextcloud Talk/Zulip/Email 送出函式參數、共用的管道清單正確呼叫每個管道 |
 | 9 | `test_field_schema.py` | 6 | 純 JSON 通過、zlib 壓縮 round-trip、None/損毀處理、DB 儲存+讀取 |
 | 10 | `test_multi_server.py` | 6 | 多伺服器設定、依名稱取得伺服器、排程器讀取伺服器、UI 伺服器選擇器、JS 儲存/載入伺服器 |
 | 11 | `test_database_datetime.py` | 5 | naive/UTC/+08:00 round-trip、None 通過、offset 字串解析 |
@@ -701,6 +701,26 @@ UI 測試用的 jt-glogarch 也必須指向那台測試 Graylog（在任何主�
 - [ ] 以 `localadmin` 登入：頁面要求登入 Graylog；之後的變更以那個 Graylog 使用者執行，稽核記錄兩者都列出。
 - [ ] 沒有編輯權限的 Graylog 使用者：預覽可以載入，套用會在第一個定義停下並顯示「Graylog 拒絕你的帳號執行此操作」。
 - [ ] 登出會關閉 Graylog 工作階段（`DELETE /api/system/sessions/{id}`）。
+
+### Zulip 通知管道（v1.17.1）
+
+**自動**
+
+- [ ] `tests/test_notify_zulip.py`（8 項）：以真實 httpx client 搭配 MockTransport 檢查實際送出的內容——
+      `POST {server}/api/v1/messages`、以 bot 電子郵件＋API 金鑰做 Basic 驗證、表單 `type=stream`、`to`、
+      `topic`（預設 `jt-glogarch`）、內文放在程式碼區塊中；4xx 時顯示 Zulip 自己的錯誤文字
+      （「HTTP 401: Invalid API key」）；設定不完整時不送出且回報失敗；訊息含 ``` 也不會提早結束程式碼區塊；
+      實際通知與「傳送測試通知」走同一份管道清單（`deliver_to_channels`）；設定 API 會遮罩金鑰、表單送回遮罩值時保留原金鑰，
+      並拒絕 link-local 的伺服器 URL。
+- [ ] `tests/test_notify_test_endpoint.py`：`_send_zulip` 的參數，以及共用的管道清單以正確參數呼叫每個管道。
+- [ ] `ui-sim-test.py` 步驟 1b：通知設定頁有 Zulip 卡片，勾選「啟用」後顯示欄位、取消勾選後隱藏（原本停用的管道——這正是先前每個管道都會壞掉的情況），只有 API 金鑰是遮罩欄位
+      （只讀取，不會儲存）。
+
+**人工（每次改到通知的版本）**
+
+- [ ] 填入真實的 Zulip bot（伺服器 URL、bot 電子郵件、API 金鑰、串流），儲存後按**傳送測試通知**：
+      訊息出現在該串流／主題，標題為粗體、內文對齊；重新整理頁面後金鑰以遮罩顯示，且仍可正常發送。
+- [ ] API 金鑰錯誤時，測試結果顯示「HTTP 401: Invalid API key」。
 
 ### 測試結果
 

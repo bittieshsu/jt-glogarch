@@ -337,6 +337,14 @@ notify:
     username: ""
     password: ""
 
+  zulip:
+    enabled: false
+    server_url: ""       # e.g. https://chat.example.com
+    bot_email: ""        # the bot's email (Zulip: Personal settings > Bots)
+    api_key: ""          # the bot's API key (masked in the Web UI)
+    stream: ""           # stream (channel) the bot is subscribed to
+    topic: "jt-glogarch"
+
   email:
     enabled: false
     smtp_host: ""

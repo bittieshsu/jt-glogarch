@@ -3847,8 +3847,11 @@ async function loadNotifySettings() {
             slack: '<svg width="20" height="20" viewBox="0 0 24 24"><path fill="#E01E5A" d="M5.042 15.165a2.528 2.528 0 01-2.52 2.523A2.528 2.528 0 010 15.165a2.527 2.527 0 012.522-2.52h2.52v2.52zm1.271 0a2.527 2.527 0 012.521-2.52 2.527 2.527 0 012.521 2.52v6.313A2.528 2.528 0 018.834 24a2.528 2.528 0 01-2.521-2.522v-6.313z"/><path fill="#36C5F0" d="M8.834 5.042a2.528 2.528 0 01-2.521-2.52A2.528 2.528 0 018.834 0a2.528 2.528 0 012.521 2.522v2.52H8.834zm0 1.271a2.528 2.528 0 012.521 2.521 2.528 2.528 0 01-2.521 2.521H2.522A2.528 2.528 0 010 8.834a2.528 2.528 0 012.522-2.521h6.312z"/><path fill="#2EB67D" d="M18.956 8.834a2.528 2.528 0 012.522-2.521A2.528 2.528 0 0124 8.834a2.528 2.528 0 01-2.522 2.521h-2.522V8.834zm-1.27 0a2.528 2.528 0 01-2.523 2.521 2.527 2.527 0 01-2.52-2.521V2.522A2.527 2.527 0 0115.163 0a2.528 2.528 0 012.523 2.522v6.312z"/><path fill="#ECB22E" d="M15.163 18.956a2.528 2.528 0 012.523 2.522A2.528 2.528 0 0115.163 24a2.527 2.527 0 01-2.52-2.522v-2.522h2.52zm0-1.27a2.527 2.527 0 01-2.52-2.523 2.527 2.527 0 012.52-2.52h6.315A2.528 2.528 0 0124 15.163a2.528 2.528 0 01-2.522 2.523h-6.315z"/></svg>',
             teams: '<svg width="20" height="20" viewBox="0 0 24 24" fill="#6264A7"><path d="M20.625 8.5h-3.75c-.69 0-1.25.56-1.25 1.25v5c0 .69.56 1.25 1.25 1.25h2.5v2.5c0 .414.336.75.75.75s.75-.336.75-.75V9.75c0-.69-.56-1.25-1.25-1.25zM19.5 7a1.5 1.5 0 100-3 1.5 1.5 0 000 3zM14.5 6.5h-9C4.672 6.5 4 7.172 4 8v8c0 .828.672 1.5 1.5 1.5H9v3.25c0 .414.336.75.75.75s.75-.336.75-.75V17.5h4c.828 0 1.5-.672 1.5-1.5V8c0-.828-.672-1.5-1.5-1.5zM10 5a2 2 0 100-4 2 2 0 000 4z"/></svg>',
             nc: '<svg width="20" height="20" viewBox="0 0 24 24" fill="#0082C9"><path d="M12 2C6.477 2 2 6.477 2 12s4.477 10 10 10 10-4.477 10-10S17.523 2 12 2zm-1.5 14.5L7 13l1.414-1.414L10.5 13.672l5.086-5.086L17 10l-6.5 6.5z"/></svg>',
+            zulip: '<svg width="20" height="20" viewBox="0 0 24 24"><circle cx="12" cy="12" r="11" fill="#6492FE"/><path d="M7 7.5h10l-6.6 7.2H17v1.8H7l6.6-7.2H7z" fill="#fff"/></svg>',
             email: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M7 9l5 3.5L17 9"/><path d="M2 17V7c0-1.1.9-2 2-2h16c1.1 0 2 .9 2 2v10c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2z"/></svg>',
         };
+        // An older backend (or a config written before Zulip existed) has no block.
+        const zl = data.zulip || {};
         const _chk = (id, en) => `<label class="u041"><input type="checkbox" id="${id}" ${en ? 'checked' : ''} data-act-change="toggleChannelFields" data-act-self> ${t('notify_enabled')}</label>`;
         const _vis = (en) => en ? '' : 'data-collapsed="1"';
         // Secret field: password input + eye toggle button
@@ -3894,6 +3897,18 @@ async function loadNotifySettings() {
             </div>
         </div>
         <div class="channel-card">
+            <h4>${chLogos.zulip} Zulip</h4>
+            ${_chk('nf-zulip-enabled', zl.enabled)}
+            <div class="channel-fields" ${_vis(zl.enabled)}>
+                <p class="form-hint">${t('notify_zulip_hint')}</p>
+                <div class="form-group"><label>${t('notify_zulip_server')}</label><input type="text" id="nf-zulip-server" value="${esc(zl.server_url || '')}" placeholder="https://chat.example.com" autocomplete="off"></div>
+                <div class="form-group"><label>${t('notify_zulip_bot_email')}</label><input type="text" id="nf-zulip-email" value="${esc(zl.bot_email || '')}" placeholder="jt-glogarch-bot@chat.example.com" autocomplete="off"></div>
+                <div class="form-group"><label>${t('notify_zulip_api_key')}</label>${_secret('nf-zulip-key', zl.api_key || '')}</div>
+                <div class="form-group"><label>${t('notify_zulip_stream')}</label><input type="text" id="nf-zulip-stream" value="${esc(zl.stream || '')}" autocomplete="off"></div>
+                <div class="form-group"><label>${t('notify_zulip_topic')}</label><input type="text" id="nf-zulip-topic" value="${esc(zl.topic || 'jt-glogarch')}" autocomplete="off"></div>
+            </div>
+        </div>
+        <div class="channel-card">
             <h4>${chLogos.email} Email (SMTP)</h4>
             ${_chk('nf-email-enabled', data.email.enabled)}
             <div class="channel-fields" ${_vis(data.email.enabled)}>
@@ -3924,6 +3939,7 @@ async function saveNotifySettings(evt) {
     body.slack = {enabled: !!document.getElementById('nf-slack-enabled')?.checked, webhook_url: document.getElementById('nf-slack-url')?.value || ''};
     body.teams = {enabled: !!document.getElementById('nf-teams-enabled')?.checked, webhook_url: document.getElementById('nf-teams-url')?.value || ''};
     body.nextcloud_talk = {enabled: !!document.getElementById('nf-nc-enabled')?.checked, server_url: document.getElementById('nf-nc-server')?.value || '', token: document.getElementById('nf-nc-token')?.value || '', username: document.getElementById('nf-nc-user')?.value || '', password: document.getElementById('nf-nc-pass')?.value || ''};
+    body.zulip = {enabled: !!document.getElementById('nf-zulip-enabled')?.checked, server_url: (document.getElementById('nf-zulip-server')?.value || '').trim(), bot_email: (document.getElementById('nf-zulip-email')?.value || '').trim(), api_key: document.getElementById('nf-zulip-key')?.value || '', stream: (document.getElementById('nf-zulip-stream')?.value || '').trim(), topic: (document.getElementById('nf-zulip-topic')?.value || '').trim() || 'jt-glogarch'};
     const toAddrs = (document.getElementById('nf-email-to')?.value || '').split('\n').map(s => s.trim()).filter(s => s);
     body.email = {enabled: !!document.getElementById('nf-email-enabled')?.checked, smtp_host: document.getElementById('nf-email-host')?.value || '', smtp_port: parseInt(document.getElementById('nf-email-port')?.value) || 587, smtp_tls: !!document.getElementById('nf-email-tls')?.checked, smtp_user: document.getElementById('nf-email-user')?.value || '', smtp_password: document.getElementById('nf-email-pass')?.value || '', from_addr: document.getElementById('nf-email-from')?.value || '', to_addrs: toAddrs, subject_prefix: document.getElementById('nf-email-prefix')?.value || '[jt-glogarch]'};
 
@@ -3937,8 +3953,12 @@ async function saveNotifySettings(evt) {
 }
 
 function toggleChannelFields(checkbox) {
+    // A channel rendered disabled is hidden by `.channel-fields[data-collapsed]`
+    // (util.css; it replaced an inline display:none for the CSP). Setting
+    // style.display here could not override that rule, so ticking "Enabled" on a
+    // channel that started disabled never showed its fields.
     const fields = checkbox.closest('.channel-card')?.querySelector('.channel-fields');
-    if (fields) fields.style.display = checkbox.checked ? '' : 'none';
+    if (fields) fields.toggleAttribute('data-collapsed', !checkbox.checked);
 }
 
 function toggleSecret(btn) {
