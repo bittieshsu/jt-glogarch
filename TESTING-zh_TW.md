@@ -239,6 +239,11 @@ GL_PASS='<graylog-admin-密碼>' bash scripts/e2e-archive-test.sh
 - [ ] **沒有任何呼叫寫死 `verify=False`**（`tests/test_tls_verify.py`，以 AST 檢查）。
       *曾有 7 處這樣寫，導致開啟 `verify_ssl` 的操作者在大部分路徑有驗證、在這幾處
       卻無聲地沒有——其中好幾條會傳送憑證（v1.13.91）。*
+- [ ] **httpx 信任的憑證包是最新的**（`tests/test_tls_trust.py`）：兩份 `pyproject.toml` 都保留
+      `certifi >= 2026.10.19`，且已安裝的憑證包不含「emSign ECC Root CA - G3」（GHSA-6q48-6c7w-9gw2）。
+      httpx 讀的是 certifi，不是作業系統的憑證庫——只更新系統的 `ca-certificates`，通知管道仍然暴露。
+      升級路徑：在裝有舊版 certifi 的主機上，`upgrade.sh` 跑完後必須是 2026.10.19 以上
+      （由它的 `[report]` 相依套件步驟套用下限）
 - [ ] 若調高預算或新增 `# nosec`，必須在 commit 訊息中說明理由
 
 ### 破壞性操作——清除目標索引集合（v1.13.66）
@@ -504,6 +509,12 @@ GL_PASS='<graylog-admin-密碼>' bash scripts/e2e-archive-test.sh
 - [ ] `tests/test_notify_format.py` 通過：僅有溢出的執行標題為 `export_overflow`
       （非 `export_err`）、以 `EXPORT_COMPLETE`（非 `ERROR`）送出、內文寫「已歸檔、
       不會重試」——真正的 chunk 失敗仍優先且以錯誤回報
+- [ ] **通知要寫出數字**（`test_overflow_notice_states_how_many_were_not_read`、
+      `tests/test_overflow_holes.py::test_truncation_record_carries_the_count`）：
+      每個時間點那行寫「該毫秒共 N 筆：已保留 10,000，未讀取 M」。Graylog 的 `to` 不含端點——
+      計數必須查 `[ms, ms + 1)`；`from == to` 會計得 0，數字就無聲地消失。測試中的假 Graylog
+      也必須不含端點（包含端點的版本讓這個問題一直通過）。實機：收到溢出通知時，未讀取的數字
+      等於 OpenSearch 對該毫秒的計數減 10,000。標題不得寫「少數」。
 - [ ] 測試任何 `notify_*` 路徑：繞過 conftest 的自動靜音——在 import 時抓真函式
       （`_REAL = S.notify_export_complete`）再 patch `send_notification`；對空殼斷言
       會空過

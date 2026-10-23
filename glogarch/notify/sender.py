@@ -329,7 +329,7 @@ _MSG = {
     "en": {
         "export_ok": "✅ Export Complete",
         "export_err": "⚠️ Export Completed with Errors",
-        "export_overflow": "⚠️ Export Complete (a few records exceeded the API per-query limit)",
+        "export_overflow": "⚠️ Export Complete (some records exceeded the API per-query limit)",
         "overflow_counts": "({total} in that millisecond: {kept} kept, {unread} unread)",
         "overflow_note": ("What this means: one single millisecond held more than 10,000 messages, "
                           "and 10,000 is the most Graylog's API can return for one query. At the {n} "
@@ -380,7 +380,7 @@ _MSG = {
     "zh-TW": {
         "export_ok": "✅ 匯出成功",
         "export_err": "⚠️ 匯出完成（有錯誤）",
-        "export_overflow": "⚠️ 匯出完成（少數記錄超出 API 單次上限）",
+        "export_overflow": "⚠️ 匯出完成（部分記錄超出 API 單次上限）",
         "overflow_counts": "（該毫秒共 {total} 筆：已保留 {kept}，未讀取 {unread}）",
         "overflow_note": ("這是什麼意思：同一毫秒內出現超過 10000 筆記錄，而 Graylog API 單次查詢"
                           "最多只能回傳 10000 筆。以下 {n} 個時間點，超出上限的那些記錄無法讀取。\n"

@@ -312,6 +312,13 @@ Run by `run-tests.sh`; ZAP is dynamic and structurally cannot see any of this.
 - [ ] **No call hardcodes `verify=False`** (`tests/test_tls_verify.py`, AST).
       *Seven sites did, so an operator who turned `verify_ssl` ON got it on most
       paths and silently not on those — several carrying credentials (v1.13.91).*
+- [ ] **The CA bundle httpx trusts is current** (`tests/test_tls_trust.py`):
+      `certifi >= 2026.10.19` stays in BOTH `pyproject.toml` copies, and the
+      installed bundle does not contain *emSign ECC Root CA - G3*
+      (GHSA-6q48-6c7w-9gw2). httpx reads certifi, not the OS store — an OS
+      `ca-certificates` update alone leaves the notification channels exposed.
+      Upgrade path: from a host holding an older certifi, `upgrade.sh` must leave
+      2026.10.19+ (its `[report]` deps step resolves the floor)
 - [ ] A raised budget or a new `# nosec` is justified in the commit message
 
 ### Security — OWASP ZAP DAST (must be 0 High / 0 Medium)
@@ -649,6 +656,14 @@ failure.
       `export_overflow` (not `export_err`), routed `EXPORT_COMPLETE` (not
       `ERROR`), and its body says "archived; NOT retried" — a real chunk
       failure still outranks it and reports as an error
+- [ ] **The notice carries the numbers** (`test_overflow_notice_states_how_many_were_not_read`,
+      `tests/test_overflow_holes.py::test_truncation_record_carries_the_count`):
+      each timestamp line says "N in that millisecond: 10,000 kept, M unread".
+      Graylog's `to` is EXCLUSIVE — the count must ask `[ms, ms + 1)`; `from == to`
+      counts 0 and the numbers silently vanished. A fake Graylog in a test must be
+      end-exclusive too (the inclusive one let this pass). Live: on an overflow
+      notice, the unread number matches an OpenSearch count of that millisecond
+      minus 10,000. The title never says "a few".
 - [ ] Testing any `notify_*` path: bypass conftest's autouse mute — capture the
       REAL function at import (`_REAL = S.notify_export_complete`) then patch
       `send_notification`; asserting against the stub passes vacuously

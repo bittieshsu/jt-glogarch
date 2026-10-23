@@ -303,15 +303,18 @@ class GraylogSearch:
                     # count, only on overflow, so the notification can say
                     # "N records, 10,000 kept, N-10,000 unread" — without it
                     # the operator could not tell 50 lost from 50,000.
+                    # Graylog's `to` is EXCLUSIVE: from == to counts 0, which
+                    # silently dropped the numbers from every notification.
                     _ms_total = None
                     try:
                         _ms_from = self._parse_timestamp(last_ts)
                         if _ms_from:
                             _ms_total = await self.count_messages(
-                                query, _ms_from, _ms_from, streams)
+                                query, _ms_from, _ms_from + timedelta(milliseconds=1),
+                                streams)
                     except Exception as e:
-                        log.debug("Could not count the overflowing millisecond",
-                                  timestamp=last_ts, error=str(e))
+                        log.warning("Could not count the overflowing millisecond",
+                                    timestamp=last_ts, error=str(e))
                     self.truncated_windows.append(
                         {"timestamp": last_ts, "kept": RESULT_WINDOW,
                          "total": _ms_total})

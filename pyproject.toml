@@ -14,6 +14,10 @@ authors = [{name = "Jason Cheng", email = "jason@jason.tools"}]
 dependencies = [
     "click>=8.1",
     "httpx>=0.27",
+    # httpx verifies TLS against certifi, not the OS store. Before 2026.10.19 it
+    # trusts emSign ECC Root CA - G3, whose intermediates' keys leaked
+    # (GHSA-6q48-6c7w-9gw2) - notifications to Telegram/Slack/... go over it.
+    "certifi>=2026.10.19",
     "pydantic>=2.5",
     "pydantic-settings>=2.1",
     "aiosqlite>=0.20",

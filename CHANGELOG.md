@@ -2,6 +2,40 @@
 
 All notable changes to jt-glogarch will be documented in this file.
 
+## [1.17.2] - 2026-10-22
+
+### Security
+
+- **Requires `certifi >= 2026.10.19` (GHSA-6q48-6c7w-9gw2).** Eight eMudhra
+  intermediate CA keys under *emSign ECC Root CA - G3* leaked, so anyone can sign a
+  certificate that older certifi bundles accept. jt-glogarch's HTTP client (httpx)
+  verifies against certifi, not the OS store, so updating the OS `ca-certificates`
+  does not cover it — and the notifications to Telegram, Discord, Slack, Teams and
+  Zulip go over it. `upgrade.sh` already installs missing or too-old dependencies,
+  so an upgrade pulls the fixed certifi with no extra step (checked in a scratch
+  venv holding 2026.6.17: it was replaced by 2026.10.19); the offline bundle takes
+  its dependency list from the same metadata. A new test fails if the floor is
+  dropped or if the installed bundle still trusts that root.
+
+### Fixed
+
+- **The over-full-millisecond notice now says how many records were not read.**
+  An API export that hits Graylog's 10,000-per-query ceiling inside one millisecond
+  counts that millisecond so the notice can say "49,130 in that millisecond: 10,000
+  kept, 39,130 unread". The count asked for `from == to`, and Graylog's `to` is
+  exclusive, so it was always 0 and the numbers never appeared — a real notice
+  listed one timestamp and said nothing about the 39,130 records behind it. It now
+  counts `[ms, ms + 1)`. A failed count is logged as a warning (it was debug-only).
+  The unit test's fake Graylog was inclusive on `to`, which is how this passed; it
+  now matches the real API.
+- **The notice title no longer says "a few records".** It now says "some records":
+  the size is in the body, and the one real case was 39,130.
+
+### Verified
+
+- Graylog 7.1.9, the same overflowing millisecond: `from == to` counts 0,
+  `to = from + 1 ms` counts 49,130.
+
 ## [1.17.1] - 2026-10-19
 
 ### Added
